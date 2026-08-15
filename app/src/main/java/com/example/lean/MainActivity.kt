@@ -94,11 +94,11 @@ class MainActivity : ComponentActivity() {
                     val navBackStackEntry by navController.currentBackStackEntryAsState()
                     val currentRoute = navBackStackEntry?.destination?.route
 
-                    val isMainTabScreen = currentRoute in listOf("home", "history", "settings")
+                    val showBottomBar = currentRoute in listOf("home", "history", "settings")
 
                     Scaffold(
                         bottomBar = {
-                            if (isMainTabScreen && sessionState.rideState == RideState.IDLE) {
+                            if (showBottomBar) {
                                 NavigationBar(
                                     containerColor = MaterialTheme.colorScheme.surface,
                                     tonalElevation = 8.dp
@@ -202,6 +202,13 @@ class MainActivity : ComponentActivity() {
 
                                 // 2. RIDE PREPARATION SCREEN
                                 composable("prepare") {
+                                    DisposableEffect(Unit) {
+                                        onDispose {
+                                            if (viewModel.activeRideSession.value.rideState == RideState.PREPARING) {
+                                                viewModel.returnToHomeFromRide()
+                                            }
+                                        }
+                                    }
                                     PreparationScreen(
                                         leanState = uiState,
                                         locationData = locationData,
