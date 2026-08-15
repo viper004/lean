@@ -56,23 +56,23 @@ class OrientationEstimator {
         val angleZ = gz * dt
 
         // Rotate current gravity vector by small gyro step
-        // Rotation around X, Y, Z axes
+        // Rotation around X, Y, Z axes using passive coordinate transformations R(-angle)
         var g = gravityVector
 
         // Rotate around X
         val cosX = cos(angleX)
         val sinX = sin(angleX)
-        g = Vector3D(g.x, g.y * cosX - g.z * sinX, g.y * sinX + g.z * cosX)
+        g = Vector3D(g.x, g.y * cosX + g.z * sinX, -g.y * sinX + g.z * cosX)
 
         // Rotate around Y
         val cosY = cos(angleY)
         val sinY = sin(angleY)
-        g = Vector3D(g.x * cosY + g.z * sinY, g.y, -g.x * sinY + g.z * cosY)
+        g = Vector3D(g.x * cosY - g.z * sinY, g.y, g.x * sinY + g.z * cosY)
 
         // Rotate around Z
         val cosZ = cos(angleZ)
         val sinZ = sin(angleZ)
-        g = Vector3D(g.x * cosZ - g.y * sinZ, g.x * sinZ + g.y * cosZ, g.z)
+        g = Vector3D(g.x * cosZ + g.y * sinZ, -g.x * sinZ + g.y * cosZ, g.z)
 
         // Complementary filter: blend gyro-rotated gravity with current filtered accel gravity
         gravityVector = Vector3D(

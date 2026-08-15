@@ -53,6 +53,51 @@ class RideAnalyticsTest {
         assertEquals(0.0f, initialLean, 0.5f)
     }
 
+    // Test 2b: Left, Center, Right tilt direction sign validation
+    @Test
+    fun testLeanAngleDirectionLeftCenterRight() {
+        val uprightGravity = Vector3D(0.0f, 9.81f, 0.0f)
+        calibrationManager.calibrate(uprightGravity)
+        assertTrue(calibrationManager.isCalibrated)
+
+        // CENTER -> ~0°
+        val centerAngle = calibrationManager.calculateLeanAngle(uprightGravity)
+        assertEquals(0.0f, centerAngle, 0.5f)
+
+        // Physical LEFT tilt (top of phone tilts left -> right edge tilts UP -> gravity shifts +X in body)
+        val leftTiltGravity = Vector3D(4.905f, 8.495f, 0.0f) // ~30° left tilt
+        val leftAngle = calibrationManager.calculateLeanAngle(leftTiltGravity)
+        assertTrue("Physical LEFT tilt must produce negative angle", leftAngle < -15.0f)
+
+        // Physical RIGHT tilt (top of phone tilts right -> right edge tilts DOWN -> gravity shifts -X in body)
+        val rightTiltGravity = Vector3D(-4.905f, 8.495f, 0.0f) // ~30° right tilt
+        val rightAngle = calibrationManager.calculateLeanAngle(rightTiltGravity)
+        assertTrue("Physical RIGHT tilt must produce positive angle", rightAngle > 15.0f)
+    }
+
+    // Test 2c: Pitched-forward phone mount left/center/right tilt sign validation
+    @Test
+    fun testPitchedForwardMountTiltDirection() {
+        // Phone mounted on handlebar pitched forward by 15°
+        val pitchedForwardGravity = Vector3D(0.0f, 9.476f, -2.539f)
+        calibrationManager.calibrate(pitchedForwardGravity)
+        assertTrue(calibrationManager.isCalibrated)
+
+        // CENTER -> ~0°
+        val centerAngle = calibrationManager.calculateLeanAngle(pitchedForwardGravity)
+        assertEquals(0.0f, centerAngle, 0.5f)
+
+        // Physical LEFT tilt (~30°) when pitched forward
+        val leftTiltPitchedGravity = Vector3D(4.905f, 8.206f, -2.200f)
+        val leftAngle = calibrationManager.calculateLeanAngle(leftTiltPitchedGravity)
+        assertTrue("Physical LEFT tilt when pitched forward must produce negative angle", leftAngle < -15.0f)
+
+        // Physical RIGHT tilt (~30°) when pitched forward
+        val rightTiltPitchedGravity = Vector3D(-4.905f, 8.206f, -2.200f)
+        val rightAngle = calibrationManager.calculateLeanAngle(rightTiltPitchedGravity)
+        assertTrue("Physical RIGHT tilt when pitched forward must produce positive angle", rightAngle > 15.0f)
+    }
+
     // Test 3: Timer calculation
     @Test
     fun testTimerAccumulation() {

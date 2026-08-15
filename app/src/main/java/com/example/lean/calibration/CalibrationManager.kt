@@ -24,15 +24,21 @@ class CalibrationManager {
         val normGrav = currentGravity.normalize()
         if (normGrav.length() < 0.5f) return // invalid sensor reading
 
-        // Up vector at calibration (opposite to gravity vector)
-        val zUp = normGrav.scale(-1f)
+        // Up vector at calibration (normGrav points UP in phone body coordinates)
+        val zUp = normGrav
 
-        // Choose phone hardware axis to project for forward reference
-        // Use phone Y-axis (0, 1, 0) by default
-        val phoneY = Vector3D(0f, 1f, 0f)
-        var yProj = phoneY.minus(zUp.scale(phoneY.dot(zUp)))
+        // Choose phone hardware axis to project for forward reference.
+        // For portrait phone mount on motorcycle, phone -Z axis (0, 0, -1) points out the back of the phone (forward).
+        val phoneNegZ = Vector3D(0f, 0f, -1f)
+        var yProj = phoneNegZ.minus(zUp.scale(phoneNegZ.dot(zUp)))
 
-        // If phone is flat face-up, phone Y-axis aligns with zUp, project phone X-axis (1, 0, 0)
+        // If phone is flat on tank bag (zUp parallel to phoneNegZ), try phone Y-axis (0, 1, 0)
+        if (yProj.length() < 0.2f) {
+            val phoneY = Vector3D(0f, 1f, 0f)
+            yProj = phoneY.minus(zUp.scale(phoneY.dot(zUp)))
+        }
+
+        // Fallback to phone X-axis if still degenerate
         if (yProj.length() < 0.2f) {
             val phoneX = Vector3D(1f, 0f, 0f)
             yProj = phoneX.minus(zUp.scale(phoneX.dot(zUp)))
@@ -67,11 +73,9 @@ class CalibrationManager {
         val gx = gNorm.dot(referenceRightAxis)
         val gz = gNorm.dot(referenceUpAxis)
 
-        // Note: At zero calibration, current gravity points in -zUp direction:
-        // gz = gNorm.dot(zUp) = -1.0, gx = 0.0 -> atan2(0.0, 1.0) = 0°
-        // Lean RIGHT: gravity shifts LEFT in reference frame -> gx < 0 -> -gx > 0 -> positive degrees
-        // Lean LEFT: gravity shifts RIGHT in reference frame -> gx > 0 -> -gx < 0 -> negative degrees
-        val angleRad = atan2(-gx, -gz)
+        // Physical LEFT tilt: gravity vector shifts right in phone frame -> gx > 0 -> -gx < 0 -> negative degrees (LEFT)
+        // Physical RIGHT tilt: gravity vector shifts left in phone frame -> gx < 0 -> -gx > 0 -> positive degrees (RIGHT)
+        val angleRad = atan2(-gx, gz)
         return Math.toDegrees(angleRad.toDouble()).toFloat()
     }
 

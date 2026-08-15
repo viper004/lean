@@ -32,6 +32,24 @@ class RideLocationManager(private val context: Context) : LocationListener {
     private var maxSpeedMps: Float = 0f
     private var isListening: Boolean = false
 
+    fun checkPermissionAndStatus(): Boolean {
+        val hasFine = context.checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        val hasCoarse = context.checkSelfPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        val isGranted = hasFine || hasCoarse
+
+        _locationData.update {
+            it.copy(
+                isGpsPermissionGranted = isGranted,
+                statusMessage = if (isGranted) {
+                    if (it.isGpsActive) "GPS Active" else "GPS Off"
+                } else {
+                    "GPS Permission Denied"
+                }
+            )
+        }
+        return isGranted
+    }
+
     @SuppressLint("MissingPermission")
     fun startListening() {
         if (isListening) return

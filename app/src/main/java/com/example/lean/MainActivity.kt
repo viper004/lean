@@ -1,9 +1,16 @@
 package com.example.lean
 
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Bundle
+import android.provider.Settings
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -21,13 +28,19 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
+import androidx.core.app.ActivityCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -36,6 +49,7 @@ import androidx.navigation.compose.rememberNavController
 import com.example.lean.data.RideEntity
 import com.example.lean.data.RideState
 import com.example.lean.ui.LeanViewModel
+import com.example.lean.ui.components.LocationPermissionDialog
 import com.example.lean.ui.screens.DebugSensorScreen
 import com.example.lean.ui.screens.HomeScreen
 import com.example.lean.ui.screens.LiveRideScreen
@@ -57,15 +71,104 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val userSettings by viewModel.userSettings.collectAsState()
+            val context = LocalContext.current
+            val lifecycleOwner = LocalLifecycleOwner.current
+
+            fun isLocationGranted(): Boolean {
+                val fineGranted = ActivityCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                val coarseGranted = ActivityCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                return fineGranted || coarseGranted
+            }
+
+            var showPermissionDialog by remember { mutableStateOf(false) }
+            var userDismissedDialogThisSession by remember { mutableStateOf(false) }
+
+            val permissionLauncher = rememberLauncherForActivityResult(
+                contract = ActivityResultContracts.RequestMultiplePermissions()
+            ) { permissions ->
+                val fineGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] ?: false
+                val coarseGranted = permissions[Manifest.permission.ACCESS_COARSE_LOCATION] ?: false
+                if (fineGranted || coarseGranted) {
+                    showPermissionDialog = false
+                    viewModel.onLocationPermissionGranted()
+                } else {
+                    showPermissionDialog = false
+                    userDismissedDialogThisSession = true
+                }
+            }
 
             LeanTheme(appThemeMode = userSettings.themeMode) {
                 var showSplash by remember { mutableStateOf(true) }
+
+                LaunchedEffect(showSplash) {
+                    if (!showSplash && !isLocationGranted() && !userDismissedDialogThisSession) {
+                        showPermissionDialog = true
+                    }
+                }
+
+                DisposableEffect(lifecycleOwner) {
+                    val observer = LifecycleEventObserver { _, event ->
+                        if (event == Lifecycle.Event.ON_RESUME) {
+                            if (isLocationGranted()) {
+                                showPermissionDialog = false
+                                viewModel.onLocationPermissionGranted()
+                            }
+                        }
+                    }
+                    lifecycleOwner.lifecycle.addObserver(observer)
+                    onDispose {
+                        lifecycleOwner.lifecycle.removeObserver(observer)
+                    }
+                }
 
                 if (showSplash) {
                     SplashScreen(
                         onSplashFinished = { showSplash = false }
                     )
                 } else {
+                    if (showPermissionDialog) {
+                        LocationPermissionDialog(
+                            onAllowClick = {
+                                if (isLocationGranted()) {
+                                    showPermissionDialog = false
+                                    viewModel.onLocationPermissionGranted()
+                                } else {
+                                    val fineRationale = ActivityCompat.shouldShowRequestPermissionRationale(
+                                        this@MainActivity,
+                                        Manifest.permission.ACCESS_FINE_LOCATION
+                                    )
+                                    val coarseRationale = ActivityCompat.shouldShowRequestPermissionRationale(
+                                        this@MainActivity,
+                                        Manifest.permission.ACCESS_COARSE_LOCATION
+                                    )
+
+                                    val prefs = getSharedPreferences("lean_location_prefs", MODE_PRIVATE)
+                                    val hasRequestedBefore = prefs.getBoolean("has_requested_location", false)
+
+                                    if (hasRequestedBefore && !fineRationale && !coarseRationale) {
+                                        // Guided user to app system settings if permanently denied
+                                        val intent = Intent(
+                                            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                            Uri.fromParts("package", packageName, null)
+                                        )
+                                        startActivity(intent)
+                                    } else {
+                                        prefs.edit().putBoolean("has_requested_location", true).apply()
+                                        permissionLauncher.launch(
+                                            arrayOf(
+                                                Manifest.permission.ACCESS_FINE_LOCATION,
+                                                Manifest.permission.ACCESS_COARSE_LOCATION
+                                            )
+                                        )
+                                    }
+                                }
+                            },
+                            onDenyClick = {
+                                showPermissionDialog = false
+                                userDismissedDialogThisSession = true
+                            }
+                        )
+                    }
                     val uiState by viewModel.uiState.collectAsState()
                     val sessionState by viewModel.activeRideSession.collectAsState()
                     val locationData by viewModel.locationData.collectAsState()

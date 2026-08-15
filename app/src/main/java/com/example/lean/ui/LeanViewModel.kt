@@ -344,8 +344,20 @@ class LeanViewModel(application: Application) : AndroidViewModel(application), S
         }
     }
 
+    fun checkLocationPermissionStatus(): Boolean {
+        return locationManager.checkPermissionAndStatus()
+    }
+
+    fun onLocationPermissionGranted() {
+        locationManager.checkPermissionAndStatus()
+        if (_userSettings.value.isGpsEnabled && activeRideSession.value.rideState != RideState.IDLE) {
+            locationManager.startListening()
+        }
+    }
+
     fun onResume() {
         sensorManager.start(_userSettings.value.sensorMode)
+        locationManager.checkPermissionAndStatus()
         if (_userSettings.value.isGpsEnabled && activeRideSession.value.rideState == RideState.RECORDING) {
             locationManager.startListening()
         }
