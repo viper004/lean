@@ -1,6 +1,7 @@
-# Motorcycle Lean Angle / Inclinometer App 🏍️📱
+# Motorcycle Lean Angle / Inclinometer App 
 
 A complete, high-precision personal motorcycle lean-angle and inclinometer application built from scratch using **Android Studio + Kotlin + Jetpack Compose + Material 3**.
+Latest Build : https://drive.google.com/file/d/1tjGrjM6tVonBtNM27XurQrCO_k3rXlt9/view?usp=sharing
 
 ---
 
