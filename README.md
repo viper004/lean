@@ -1,6 +1,7 @@
-# Motorcycle Lean Angle / Inclinometer App 🏍️📱
+# Motorcycle Lean Angle / Inclinometer App 
 
 A complete, high-precision personal motorcycle lean-angle and inclinometer application built from scratch using **Android Studio + Kotlin + Jetpack Compose + Material 3**.
+Latest Build : https://drive.google.com/file/d/1tjGrjM6tVonBtNM27XurQrCO_k3rXlt9/view?usp=sharing
 
 ---
 
@@ -12,10 +13,10 @@ A complete, high-precision personal motorcycle lean-angle and inclinometer appli
    - Lean right relative to reference $\rightarrow$ positive angle (`+32.5° RIGHT`).
    - Lean left relative to reference $\rightarrow$ negative angle (`-18.2° LEFT`).
 
-2. **Sensor Fusion & Realme 11x Fallback**
+2. **Sensor Fusion **
    - **Primary Sensors**: Gyroscope (`Sensor.TYPE_GYROSCOPE`) + Accelerometer (`Sensor.TYPE_ACCELEROMETER`).
    - **Fused Mode**: Uses Android `TYPE_GAME_ROTATION_VECTOR` or complementary sensor fusion (gyroscope angular velocity integration + low-pass accelerometer gravity correction).
-   - **Hardware Fallback**: Automatically detects missing gyroscope hardware (such as on **Realme 11x**). Automatically falls back to accelerometer tilt measurement and displays an unobtrusive warning (`Gyroscope unavailable — using accelerometer mode.`).
+   - **Hardware Fallback**: Automatically detects missing gyroscope hardware. Automatically falls back to accelerometer tilt measurement and displays an unobtrusive warning (`Gyroscope unavailable — using accelerometer mode.`).
    - **Offline & Allocation-Free**: Zero backend required, 100% offline, zero allocation inside high-frequency sensor callbacks (50–100 Hz).
 
 3. **High-Contrast Modern Dashboard UI**
@@ -112,7 +113,7 @@ The compiled APK artifact will be placed at:
 `app/build/outputs/apk/debug/app-debug.apk`
 
 ### Installing on Device / Emulator
-To install directly to a connected Android device (e.g. Realme 11x or emulator):
+To install directly to a connected Android device :
 
 ```bash
 ./gradlew installDebug
