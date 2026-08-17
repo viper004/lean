@@ -56,6 +56,7 @@ import com.example.lean.ui.theme.primaryCyan
 import com.example.lean.ui.theme.primaryLime
 import com.example.lean.ui.theme.textMuted
 import java.util.Locale
+import kotlin.math.roundToInt
 
 @Composable
 fun LiveRideScreen(
@@ -262,7 +263,7 @@ fun LiveRideScreen(
                     Column {
                         Text("MAX LEFT LEAN", fontSize = 11.sp, color = MaterialTheme.colorScheme.textMuted, fontWeight = FontWeight.Bold)
                         Text(
-                            text = String.format(Locale.US, "%.1f°", sessionState.maxLeftLean),
+                            text = String.format(Locale.US, "%d°", sessionState.maxLeftLean.roundToInt()),
                             fontSize = 20.sp,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
@@ -275,7 +276,7 @@ fun LiveRideScreen(
                     Column {
                         Text("MAX RIGHT LEAN", fontSize = 11.sp, color = MaterialTheme.colorScheme.textMuted, fontWeight = FontWeight.Bold)
                         Text(
-                            text = String.format(Locale.US, "%.1f°", sessionState.maxRightLean),
+                            text = String.format(Locale.US, "%d°", sessionState.maxRightLean.roundToInt()),
                             fontSize = 20.sp,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
@@ -288,7 +289,7 @@ fun LiveRideScreen(
                     Column {
                         Text("MAX ABSOLUTE", fontSize = 11.sp, color = MaterialTheme.colorScheme.textMuted, fontWeight = FontWeight.Bold)
                         Text(
-                            text = String.format(Locale.US, "%.1f°", sessionState.maxAbsoluteLean),
+                            text = String.format(Locale.US, "%d°", sessionState.maxAbsoluteLean.roundToInt()),
                             fontSize = 20.sp,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,

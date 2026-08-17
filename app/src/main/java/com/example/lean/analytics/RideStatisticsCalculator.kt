@@ -1,10 +1,9 @@
 package com.example.lean.analytics
 
-import com.example.lean.data.LeanSafetyRating
-import com.example.lean.data.LeanZone
 import com.example.lean.data.RideEntity
 import com.example.lean.data.UserSettings
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 class RideStatisticsCalculator(
     private var settings: UserSettings = UserSettings()
@@ -53,7 +52,10 @@ class RideStatisticsCalculator(
         warningTimeMs = 0L
         criticalTimeMs = 0L
         lastTimestampMs = -1L
+        cornerHoldDurationMs = 0L
     }
+
+    private var cornerHoldDurationMs: Long = 0L
 
     fun processTick(currentLeanAngleDegrees: Float, currentMonotonicTimeMs: Long) {
         if (lastTimestampMs < 0L) {
@@ -61,15 +63,25 @@ class RideStatisticsCalculator(
             return
         }
 
-        val deltaMs = currentMonotonicTimeMs - lastTimestampMs
+        val deltaMs: Long = currentMonotonicTimeMs - lastTimestampMs
         lastTimestampMs = currentMonotonicTimeMs
 
         // Ignore negative deltas or absurdly large jumps (> 24 hours pause recovery)
-        if (deltaMs <= 0 || deltaMs > 86400000L) return
+        if (deltaMs !in 1L..86400000L) return
 
         totalDurationMs += deltaMs
 
-        val absAngle = abs(currentLeanAngleDegrees)
+        val absAngle: Float = abs(currentLeanAngleDegrees)
+        val wholeAngle: Int = abs(currentLeanAngleDegrees.roundToInt())
+
+        // Requirement 9: Require lean angle >= 10° for at least 0.5s (500ms) before registering corner
+        if (wholeAngle >= 10) {
+            cornerHoldDurationMs += deltaMs
+        } else {
+            cornerHoldDurationMs = 0L
+        }
+
+        val isCornerRegistered: Boolean = cornerHoldDurationMs >= 500L
 
         // Peak tracking
         if (currentLeanAngleDegrees > 0.5f && currentLeanAngleDegrees > maxRightLean) {
@@ -81,9 +93,9 @@ class RideStatisticsCalculator(
             maxAbsoluteLean = absAngle
         }
 
-        // Requirement 22: Dead Zone for STRAIGHT
-        val straightThresh = settings.straightThreshold
-        if (absAngle <= straightThresh) {
+        // Dead Zone / Straight classification
+        val straightThresh: Float = settings.straightThreshold
+        if (!isCornerRegistered || wholeAngle < 10) {
             straightTimeMs += deltaMs
         } else if (currentLeanAngleDegrees < -straightThresh) {
             leftLeanTimeMs += deltaMs
@@ -94,8 +106,8 @@ class RideStatisticsCalculator(
         }
 
         // Safety threshold time accumulation
-        val warningThresh = settings.warningThreshold
-        val criticalThresh = settings.criticalThreshold
+        val warningThresh: Float = settings.warningThreshold
+        val criticalThresh: Float = settings.criticalThreshold
 
         when {
             absAngle < warningThresh -> preferredTimeMs += deltaMs
@@ -106,7 +118,7 @@ class RideStatisticsCalculator(
 
     fun finish(endTimeMillis: Long): RideEntity {
         this.endTimeMs = endTimeMillis
-        val duration = if (totalDurationMs > 0) totalDurationMs else (endTimeMs - startTimeMs).coerceAtLeast(1L)
+        val duration: Long = if (totalDurationMs > 0L) totalDurationMs else (endTimeMs - startTimeMs).coerceAtLeast(1L)
         this.totalDurationMs = duration
 
         val straightPct = (straightTimeMs.toDouble() / duration * 100.0).toFloat().coerceIn(0f, 100f)
@@ -141,3 +153,4 @@ class RideStatisticsCalculator(
         )
     }
 }
+

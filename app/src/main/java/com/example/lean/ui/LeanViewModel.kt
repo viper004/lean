@@ -32,6 +32,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 class LeanViewModel(application: Application) : AndroidViewModel(application), SensorDataListener {
 
@@ -270,6 +271,9 @@ class LeanViewModel(application: Application) : AndroidViewModel(application), S
         }
     }
 
+    private var lastDebugLogTimestamp = 0L
+    private var previousRawLeanAngle = 0f
+
     override fun onOrientationUpdated(
         gravity: Vector3D,
         rawAccel: Triple<Float, Float, Float>,
@@ -282,25 +286,48 @@ class LeanViewModel(application: Application) : AndroidViewModel(application), S
         }
 
         val rawLeanAngle = calibrationManager.calculateLeanAngle(gravity)
+
+        // Prevent isolated single-frame electrical sensor spikes (> 45° in 20ms)
+        val clampedRawAngle = if (kotlin.math.abs(rawLeanAngle - previousRawLeanAngle) > 45.0f) {
+            previousRawLeanAngle + (if (rawLeanAngle > previousRawLeanAngle) 45.0f else -45.0f)
+        } else {
+            rawLeanAngle
+        }
+        previousRawLeanAngle = clampedRawAngle
+
+        // Fast smoothing filter: filteredAngle = alpha * previousFilteredAngle + (1 - alpha) * currentAngle
         val alpha = _userSettings.value.smoothingLevel.alpha
-
-        // Exponential Moving Average filter
         val currentFiltered = _uiState.value.filteredAngleDegrees
-        val newFiltered = currentFiltered + alpha * (rawLeanAngle - currentFiltered)
+        val newFiltered = alpha * currentFiltered + (1f - alpha) * clampedRawAngle
 
-        // Peak tracking
+        val deadZone = _uiState.value.deadZoneThresholdDegrees
+        val displayAngle = if (abs(newFiltered) <= deadZone) 0 else newFiltered.roundToInt()
+
+        // Peak tracking based on filtered whole degrees
         var newMaxLeft = _uiState.value.maxLeftDegrees
         var newMaxRight = _uiState.value.maxRightDegrees
 
-        if (newFiltered > 0.5f && newFiltered > newMaxRight) {
-            newMaxRight = newFiltered
-        } else if (newFiltered < -0.5f && abs(newFiltered) > newMaxLeft) {
-            newMaxLeft = abs(newFiltered)
+        val absDisplay = abs(displayAngle).toFloat()
+        if (displayAngle > 0 && absDisplay > newMaxRight) {
+            newMaxRight = absDisplay
+        } else if (displayAngle < 0 && absDisplay > newMaxLeft) {
+            newMaxLeft = absDisplay
+        }
+
+        // Requirement 14: Throttled Logcat debugging (once per second)
+        val now = System.currentTimeMillis()
+        if (now - lastDebugLogTimestamp >= 1000L) {
+            lastDebugLogTimestamp = now
+            val accelMag = kotlin.math.sqrt(rawAccel.first * rawAccel.first + rawAccel.second * rawAccel.second + rawAccel.third * rawAccel.third)
+            android.util.Log.d(
+                "LeanDebug",
+                "Mode: ${_uiState.value.activeMode.displayName}, RawRoll: %.2f°, CalibratedRoll: %.2f°, FilteredRoll: %.2f°, DisplayAngle: %d°, AccelMag: %.2f m/s²"
+                    .format(java.util.Locale.US, rawLeanAngle, clampedRawAngle, newFiltered, displayAngle, accelMag)
+            )
         }
 
         // FPS calculation
         frameCount++
-        val now = System.currentTimeMillis()
         var currentFps = _uiState.value.sensorFps
         if (now - lastFpsTimestamp >= 1000) {
             currentFps = frameCount
@@ -338,7 +365,12 @@ class LeanViewModel(application: Application) : AndroidViewModel(application), S
             state.copy(
                 isGyroAvailable = status.hasGyroscope,
                 isAccelAvailable = status.hasAccelerometer,
+                hasGameRotationVector = status.hasGameRotationVector,
+                hasRotationVector = status.hasRotationVector,
+                hasGravity = status.hasGravity,
+                availableSensors = status.availableSensors,
                 activeMode = status.activeMode,
+                activeSensorName = status.activeSensorName,
                 feedbackMessage = status.warningMessage
             )
         }

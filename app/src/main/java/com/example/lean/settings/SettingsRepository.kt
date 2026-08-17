@@ -14,7 +14,7 @@ class SettingsRepository(context: Context) {
     fun getSettings(): UserSettings {
         val themeName = prefs.getString(KEY_THEME_MODE, AppThemeMode.DARK.name) ?: AppThemeMode.DARK.name
         val modeName = prefs.getString(KEY_SENSOR_MODE, SensorMode.AUTOMATIC.name) ?: SensorMode.AUTOMATIC.name
-        val smoothingName = prefs.getString(KEY_SMOOTHING_LEVEL, SmoothingLevel.BALANCED.name) ?: SmoothingLevel.BALANCED.name
+        val smoothingName = prefs.getString(KEY_SMOOTHING_LEVEL, SmoothingLevel.MEDIUM.name) ?: SmoothingLevel.MEDIUM.name
         val keepAwake = prefs.getBoolean(KEY_KEEP_SCREEN_AWAKE, true)
         val lockOrientation = prefs.getBoolean(KEY_LOCK_ORIENTATION, false)
         val straightThreshold = prefs.getFloat(KEY_STRAIGHT_THRESHOLD, 3f)
@@ -25,7 +25,7 @@ class SettingsRepository(context: Context) {
 
         val themeMode = runCatching { AppThemeMode.valueOf(themeName) }.getOrDefault(AppThemeMode.DARK)
         val sensorMode = runCatching { SensorMode.valueOf(modeName) }.getOrDefault(SensorMode.AUTOMATIC)
-        val smoothingLevel = runCatching { SmoothingLevel.valueOf(smoothingName) }.getOrDefault(SmoothingLevel.BALANCED)
+        val smoothingLevel = runCatching { SmoothingLevel.valueOf(smoothingName) }.getOrDefault(SmoothingLevel.MEDIUM)
 
         return UserSettings(
             themeMode = themeMode,

@@ -58,6 +58,7 @@ import java.util.Locale
 @Composable
 fun SettingsScreen(
     settings: UserSettings,
+    leanState: com.example.lean.data.LeanState? = null,
     onThemeModeChange: (AppThemeMode) -> Unit,
     onSensorModeChange: (SensorMode) -> Unit,
     onSmoothingLevelChange: (SmoothingLevel) -> Unit,
@@ -107,7 +108,7 @@ fun SettingsScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Section 0: Appearance (Requirement 10 & 1)
+            // Section 0: Appearance
             SettingsSectionHeader("APPEARANCE")
 
             Card(
@@ -166,7 +167,148 @@ fun SettingsScreen(
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // Section 1: Ride Thresholds
+            // Section 1: Hardware Availability
+            SettingsSectionHeader("AVAILABLE HARDWARE SENSORS")
+
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(16.dp))
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    SensorAvailabilityRow("Accelerometer", leanState?.isAccelAvailable ?: true)
+                    SensorAvailabilityRow("Gyroscope", leanState?.isGyroAvailable ?: true)
+                    SensorAvailabilityRow("Game Rotation Vector", leanState?.hasGameRotationVector ?: true)
+                    SensorAvailabilityRow("Rotation Vector", leanState?.hasRotationVector ?: true)
+                    SensorAvailabilityRow("Gravity", leanState?.hasGravity ?: true)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            // Section 2: Sensor Mode
+            SettingsSectionHeader("SENSOR MODE")
+
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(16.dp))
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    SensorMode.values().forEach { mode ->
+                        val isAvailable = when (mode) {
+                            SensorMode.AUTOMATIC -> true
+                            SensorMode.GAME_ROTATION_VECTOR -> leanState?.hasGameRotationVector ?: true
+                            SensorMode.ROTATION_VECTOR -> leanState?.hasRotationVector ?: true
+                            SensorMode.FUSED_GYRO_ACCEL -> (leanState?.isGyroAvailable ?: true) && (leanState?.isAccelAvailable ?: true)
+                            SensorMode.ACCEL_ONLY -> leanState?.isAccelAvailable ?: true
+                        }
+
+                        val isSelected = settings.sensorMode == mode
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isSelected) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface)
+                                .clickable(enabled = isAvailable) { onSensorModeChange(mode) }
+                                .padding(vertical = 8.dp, horizontal = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = isSelected,
+                                enabled = isAvailable,
+                                onClick = { if (isAvailable) onSensorModeChange(mode) },
+                                colors = RadioButtonDefaults.colors(selectedColor = MaterialTheme.colorScheme.primaryCyan)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = mode.displayName,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = if (isAvailable) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                                )
+                                if (mode == SensorMode.AUTOMATIC) {
+                                    Text(
+                                        text = "Using: ${leanState?.activeSensorName ?: "Game Rotation Vector"}",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primaryLime
+                                    )
+                                } else {
+                                    Text(
+                                        text = if (isAvailable) mode.description else "Unavailable on device hardware",
+                                        fontSize = 12.sp,
+                                        color = if (isAvailable) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            // Section 3: Smoothing
+            SettingsSectionHeader("SMOOTHING LEVEL")
+
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(16.dp))
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    SmoothingLevel.values().forEach { level ->
+                        val isSelected = (settings.smoothingLevel == level)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isSelected) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface)
+                                .clickable { onSmoothingLevelChange(level) }
+                                .padding(vertical = 8.dp, horizontal = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = isSelected,
+                                onClick = { onSmoothingLevelChange(level) },
+                                colors = RadioButtonDefaults.colors(selectedColor = MaterialTheme.colorScheme.primaryCyan)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    text = level.displayName,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                val detail = when (level) {
+                                    SmoothingLevel.LOW -> "Fastest response (alpha = 0.65). Best for aggressive entry."
+                                    SmoothingLevel.MEDIUM -> "Balanced response (alpha = 0.80). Recommended default."
+                                    SmoothingLevel.HIGH -> "Maximum stability (alpha = 0.92). Highly jitter resistant."
+                                }
+                                Text(
+                                    text = detail,
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            // Section 4: Ride Thresholds
             SettingsSectionHeader("RIDE ANALYSIS THRESHOLDS")
 
             Card(
@@ -204,158 +346,6 @@ fun SettingsScreen(
                         unit = "°",
                         onValueChange = onCriticalThresholdChange
                     )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(20.dp))
-
-            // Section 2: GPS Telemetry & Hardware
-            SettingsSectionHeader("GPS & HARDWARE")
-
-            Card(
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(16.dp))
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "GPS Speed & Distance",
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = "Track ride speed and distance telemetry.",
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Switch(
-                            checked = settings.isGpsEnabled,
-                            onCheckedChange = onGpsEnabledChange,
-                            colors = SwitchDefaults.colors(checkedThumbColor = MaterialTheme.colorScheme.primaryCyan)
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Keep Screen Awake",
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = "Prevents device screen from dimming while mounted.",
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Switch(
-                            checked = settings.keepScreenAwake,
-                            onCheckedChange = onKeepScreenAwakeChange,
-                            colors = SwitchDefaults.colors(checkedThumbColor = MaterialTheme.colorScheme.primaryCyan)
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(20.dp))
-
-            // Section 3: Sensor Mode
-            SettingsSectionHeader("SENSOR MODE")
-
-            Card(
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(16.dp))
-            ) {
-                Column(modifier = Modifier.padding(12.dp)) {
-                    SensorMode.values().forEach { mode ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(8.dp))
-                                .clickable { onSensorModeChange(mode) }
-                                .padding(vertical = 8.dp, horizontal = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            RadioButton(
-                                selected = (settings.sensorMode == mode),
-                                onClick = { onSensorModeChange(mode) },
-                                colors = RadioButtonDefaults.colors(selectedColor = MaterialTheme.colorScheme.primaryCyan)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Column {
-                                Text(
-                                    text = mode.displayName,
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Text(
-                                    text = mode.description,
-                                    fontSize = 12.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(20.dp))
-
-            // Section 4: Smoothing
-            SettingsSectionHeader("SMOOTHING LEVEL")
-
-            Card(
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(16.dp))
-            ) {
-                Column(modifier = Modifier.padding(12.dp)) {
-                    SmoothingLevel.values().forEach { level ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(8.dp))
-                                .clickable { onSmoothingLevelChange(level) }
-                                .padding(vertical = 8.dp, horizontal = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            RadioButton(
-                                selected = (settings.smoothingLevel == level),
-                                onClick = { onSmoothingLevelChange(level) },
-                                colors = RadioButtonDefaults.colors(selectedColor = MaterialTheme.colorScheme.primaryCyan)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = level.displayName,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                        }
-                    }
                 }
             }
 
@@ -462,6 +452,29 @@ private fun SettingsSectionHeader(title: String) {
         letterSpacing = 1.5.sp,
         modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
     )
+}
+
+@Composable
+private fun SensorAvailabilityRow(label: String, isAvailable: Boolean) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = label,
+            fontSize = 14.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = if (isAvailable) "✓ Available" else "✗ Unavailable",
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold,
+            color = if (isAvailable) MaterialTheme.colorScheme.primaryLime else MaterialTheme.colorScheme.warningAmber
+        )
+    }
 }
 
 @Composable

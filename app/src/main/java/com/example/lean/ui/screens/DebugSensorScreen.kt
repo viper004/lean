@@ -89,17 +89,37 @@ fun DebugSensorScreen(
                 Column(modifier = Modifier.padding(16.dp)) {
                     DebugRow(
                         label = "Accelerometer",
-                        value = if (state.isAccelAvailable) "PRESENT (ACTIVE)" else "NOT FOUND",
+                        value = if (state.isAccelAvailable) "PRESENT" else "NOT FOUND",
                         isHighlight = state.isAccelAvailable
                     )
                     DebugRow(
                         label = "Gyroscope",
-                        value = if (state.isGyroAvailable) "PRESENT (ACTIVE)" else "UNAVAILABLE (Fallback)",
+                        value = if (state.isGyroAvailable) "PRESENT" else "UNAVAILABLE",
                         isHighlight = state.isGyroAvailable
                     )
                     DebugRow(
-                        label = "Active Mode",
+                        label = "Game Rotation Vector",
+                        value = if (state.hasGameRotationVector) "PRESENT" else "UNAVAILABLE",
+                        isHighlight = state.hasGameRotationVector
+                    )
+                    DebugRow(
+                        label = "Rotation Vector",
+                        value = if (state.hasRotationVector) "PRESENT" else "UNAVAILABLE",
+                        isHighlight = state.hasRotationVector
+                    )
+                    DebugRow(
+                        label = "Gravity",
+                        value = if (state.hasGravity) "PRESENT" else "UNAVAILABLE",
+                        isHighlight = state.hasGravity
+                    )
+                    DebugRow(
+                        label = "Requested Mode",
                         value = state.activeMode.displayName
+                    )
+                    DebugRow(
+                        label = "Active Provider",
+                        value = state.activeSensorName,
+                        isHighlight = true
                     )
                     DebugRow(
                         label = "Sensor Update Rate",

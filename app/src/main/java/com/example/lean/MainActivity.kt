@@ -398,6 +398,7 @@ class MainActivity : ComponentActivity() {
                                 composable("settings") {
                                     SettingsScreen(
                                         settings = userSettings,
+                                        leanState = uiState,
                                         onThemeModeChange = { viewModel.updateThemeMode(it) },
                                         onSensorModeChange = { viewModel.updateSensorMode(it) },
                                         onSmoothingLevelChange = { viewModel.updateSmoothingLevel(it) },

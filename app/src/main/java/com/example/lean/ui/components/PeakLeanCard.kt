@@ -24,6 +24,7 @@ import com.example.lean.ui.theme.accentOrange
 import com.example.lean.ui.theme.primaryCyan
 import com.example.lean.ui.theme.textMuted
 import java.util.Locale
+import kotlin.math.roundToInt
 
 @Composable
 fun PeakLeanCard(
@@ -55,7 +56,7 @@ fun PeakLeanCard(
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    text = String.format(Locale.US, "%.1f°", maxLeftDegrees),
+                    text = String.format(Locale.US, "%d°", maxLeftDegrees.roundToInt()),
                     fontSize = 20.sp,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold,
@@ -89,7 +90,7 @@ fun PeakLeanCard(
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    text = String.format(Locale.US, "%.1f°", maxRightDegrees),
+                    text = String.format(Locale.US, "%d°", maxRightDegrees.roundToInt()),
                     fontSize = 20.sp,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold,

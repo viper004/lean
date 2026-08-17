@@ -6,15 +6,15 @@ enum class AppThemeMode(val displayName: String) {
 }
 
 enum class SmoothingLevel(val displayName: String, val alpha: Float) {
-    FAST("Fast (Responsive)", 0.25f),
-    BALANCED("Balanced (Default)", 0.12f),
-    SMOOTH("Smooth (Stable)", 0.05f)
+    LOW("Low (Fastest Response)", 0.65f),
+    MEDIUM("Medium (Balanced Default)", 0.80f),
+    HIGH("High (Maximum Stability)", 0.92f)
 }
 
 data class UserSettings(
     val themeMode: AppThemeMode = AppThemeMode.DARK,
     val sensorMode: SensorMode = SensorMode.AUTOMATIC,
-    val smoothingLevel: SmoothingLevel = SmoothingLevel.BALANCED,
+    val smoothingLevel: SmoothingLevel = SmoothingLevel.MEDIUM,
     val keepScreenAwake: Boolean = true,
     val lockOrientation: Boolean = false,
     val straightThreshold: Float = 3f,
