@@ -21,6 +21,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.ui.platform.LocalContext
+import com.example.lean.util.RideShareImageGenerator
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -162,6 +165,7 @@ fun HistoryRideCard(
     onClick: () -> Unit,
     onDeleteClick: () -> Unit
 ) {
+    val context = LocalContext.current
     val dateFormat = SimpleDateFormat("dd MMM yyyy · hh:mm a", Locale.US)
     val formattedDate = dateFormat.format(Date(ride.startTimeMs)).uppercase()
 
@@ -188,13 +192,26 @@ fun HistoryRideCard(
                     letterSpacing = 1.0.sp
                 )
 
-                IconButton(onClick = onDeleteClick) {
-                    Icon(
-                        imageVector = Icons.Default.Delete,
-                        contentDescription = "Delete Ride",
-                        tint = MaterialTheme.colorScheme.textMuted,
-                        modifier = Modifier.size(20.dp)
-                    )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(
+                        onClick = { RideShareImageGenerator.shareRide(context, ride) }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Share,
+                            contentDescription = "Share Ride",
+                            tint = MaterialTheme.colorScheme.primaryCyan,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
+                    IconButton(onClick = onDeleteClick) {
+                        Icon(
+                            imageVector = Icons.Default.Delete,
+                            contentDescription = "Delete Ride",
+                            tint = MaterialTheme.colorScheme.textMuted,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                 }
             }
 

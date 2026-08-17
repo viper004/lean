@@ -3,7 +3,9 @@ package com.example.lean.recorder
 import android.content.Context
 import android.content.SharedPreferences
 import android.os.SystemClock
+import com.example.lean.analytics.CornerDetector
 import com.example.lean.analytics.RideStatisticsCalculator
+import com.example.lean.data.CornerEventEntity
 import com.example.lean.data.RideEntity
 import com.example.lean.data.RideState
 import com.example.lean.data.UserSettings
@@ -30,12 +32,16 @@ class RideRecorder(context: Context) {
 
     private val prefs: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     private val calculator = RideStatisticsCalculator()
+    private val cornerDetector = CornerDetector()
 
     private val _sessionState = MutableStateFlow(ActiveRideSession())
     val sessionState: StateFlow<ActiveRideSession> = _sessionState.asStateFlow()
 
     private var initialMonotonicTimeMs: Long = 0L
     var lastCompletedRide: RideEntity? = null
+        private set
+
+    var lastCompletedCorners: List<CornerEventEntity> = emptyList()
         private set
 
     init {
@@ -65,6 +71,8 @@ class RideRecorder(context: Context) {
         initialMonotonicTimeMs = nowMonoMs
         calculator.updateSettings(settings)
         calculator.start(nowSysMs, nowMonoMs)
+        cornerDetector.reset()
+        lastCompletedCorners = emptyList()
 
         // Persist unfinished ride marker
         prefs.edit()
@@ -99,6 +107,12 @@ class RideRecorder(context: Context) {
 
         val nowMonoMs = SystemClock.elapsedRealtime()
         calculator.processTick(currentLeanDegrees, nowMonoMs)
+        cornerDetector.processTick(
+            filteredLeanDegrees = currentLeanDegrees,
+            currentSpeedKmh = currentSpeedKmh,
+            nowMonotonicMs = nowMonoMs,
+            rideStartMonotonicMs = initialMonotonicTimeMs
+        )
 
         _sessionState.update {
             it.copy(
@@ -118,7 +132,9 @@ class RideRecorder(context: Context) {
         _sessionState.update { it.copy(rideState = RideState.FINISHING) }
 
         val nowSysMs = System.currentTimeMillis()
+        val nowMonoMs = SystemClock.elapsedRealtime()
         var finalizedEntity = calculator.finish(nowSysMs)
+        lastCompletedCorners = cornerDetector.finishRide(nowMonoMs)
 
         // Attach GPS stats
         val avgSpeed = if (finalizedEntity.durationMs > 0 && distanceKm > 0) {

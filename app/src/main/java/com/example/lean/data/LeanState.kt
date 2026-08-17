@@ -1,5 +1,7 @@
 package com.example.lean.data
 
+import com.example.lean.sensor.SensorHardwareType
+import com.example.lean.sensor.SensorInfo
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -18,7 +20,18 @@ data class LeanState(
     val hasGameRotationVector: Boolean = false,
     val hasRotationVector: Boolean = false,
     val hasGravity: Boolean = false,
-    val availableSensors: List<com.example.lean.sensor.SensorInfo> = emptyList(),
+    val hasMagnetometer: Boolean = false,
+    val hasLinearAccel: Boolean = false,
+    val isGyroPhysical: Boolean = false,
+    val isAccelPhysical: Boolean = false,
+    val gyroHardwareType: SensorHardwareType = SensorHardwareType.UNAVAILABLE,
+    val accelHardwareType: SensorHardwareType = SensorHardwareType.UNAVAILABLE,
+    val gameRotHardwareType: SensorHardwareType = SensorHardwareType.UNAVAILABLE,
+    val rotVecHardwareType: SensorHardwareType = SensorHardwareType.UNAVAILABLE,
+    val gravityHardwareType: SensorHardwareType = SensorHardwareType.UNAVAILABLE,
+    val magnetometerHardwareType: SensorHardwareType = SensorHardwareType.UNAVAILABLE,
+    val linearAccelHardwareType: SensorHardwareType = SensorHardwareType.UNAVAILABLE,
+    val availableSensors: List<SensorInfo> = emptyList(),
     val activeMode: SensorMode = SensorMode.AUTOMATIC,
     val activeSensorName: String = "Game Rotation Vector",
     val activeSensorLabel: String = "Initializing...",
@@ -52,4 +65,3 @@ data class LeanState(
             return "$sign$absAngle°"
         }
 }
-

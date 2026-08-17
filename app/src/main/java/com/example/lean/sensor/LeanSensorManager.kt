@@ -5,10 +5,12 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.os.Build
 import android.util.Log
 import com.example.lean.data.SensorMode
 import com.example.lean.orientation.OrientationEstimator
 import com.example.lean.orientation.Vector3D
+import java.util.Locale
 
 interface SensorDataListener {
     fun onOrientationUpdated(gravity: Vector3D, rawAccel: Triple<Float, Float, Float>, rawGyro: Triple<Float, Float, Float>)
@@ -24,6 +26,8 @@ class LeanSensorManager(context: Context) : SensorEventListener {
     private val gameRotationSensor: Sensor? = systemSensorManager.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR)
     private val rotationVectorSensor: Sensor? = systemSensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
     private val gravitySensor: Sensor? = systemSensorManager.getDefaultSensor(Sensor.TYPE_GRAVITY)
+    private val magnetometerSensor: Sensor? = systemSensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD)
+    private val linearAccelSensor: Sensor? = systemSensorManager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION)
 
     private val orientationEstimator = OrientationEstimator()
     private var requestedMode: SensorMode = SensorMode.AUTOMATIC
@@ -47,7 +51,56 @@ class LeanSensorManager(context: Context) : SensorEventListener {
         this.listener = listener
     }
 
+    fun getSensorHardwareType(sensor: Sensor?): SensorHardwareType {
+        if (sensor == null) return SensorHardwareType.UNAVAILABLE
+
+        // 1. Fused / Composite sensors officially defined by Android specification
+        val isFusedType = when (sensor.type) {
+            Sensor.TYPE_ROTATION_VECTOR,
+            Sensor.TYPE_GAME_ROTATION_VECTOR,
+            Sensor.TYPE_GEOMAGNETIC_ROTATION_VECTOR,
+            Sensor.TYPE_GRAVITY,
+            Sensor.TYPE_LINEAR_ACCELERATION -> true
+            else -> false
+        }
+        if (isFusedType) return SensorHardwareType.FUSED
+
+        // 2. Hardware sensors: Check physical vs software / virtual
+        var isPhysical = true
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            try {
+                val method = Sensor::class.java.getMethod("isPhysicalSensor")
+                val result = method.invoke(sensor) as? Boolean
+                if (result != null) {
+                    isPhysical = result
+                }
+            } catch (e: Throwable) {
+                // Ignore reflection failure if method is not present
+            }
+        }
+
+        val nameLower = sensor.name.lowercase(Locale.US)
+        val vendorLower = sensor.vendor.lowercase(Locale.US)
+        val isSoftwareName = nameLower.contains("software") ||
+                nameLower.contains("virtual") ||
+                nameLower.contains("emulated") ||
+                nameLower.contains("synthetic") ||
+                nameLower.contains("fusion") ||
+                nameLower.contains("simulated") ||
+                nameLower.contains("uncalibrated software") ||
+                vendorLower.contains("software") ||
+                vendorLower.contains("android open source project")
+
+        if (!isPhysical || isSoftwareName) {
+            return SensorHardwareType.LOGICAL
+        }
+
+        return SensorHardwareType.PHYSICAL
+    }
+
     private fun getSensorInfo(sensor: Sensor?, typeName: String, type: Int): SensorInfo {
+        val hwType = getSensorHardwareType(sensor)
         return SensorInfo(
             type = type,
             typeName = typeName,
@@ -56,7 +109,8 @@ class LeanSensorManager(context: Context) : SensorEventListener {
             version = sensor?.version ?: 0,
             resolution = sensor?.resolution ?: 0f,
             maximumRange = sensor?.maximumRange ?: 0f,
-            isAvailable = sensor != null
+            isAvailable = sensor != null,
+            hardwareType = hwType
         )
     }
 
@@ -66,38 +120,78 @@ class LeanSensorManager(context: Context) : SensorEventListener {
             getSensorInfo(gyroscopeSensor, "Gyroscope", Sensor.TYPE_GYROSCOPE),
             getSensorInfo(gameRotationSensor, "Game Rotation Vector", Sensor.TYPE_GAME_ROTATION_VECTOR),
             getSensorInfo(rotationVectorSensor, "Rotation Vector", Sensor.TYPE_ROTATION_VECTOR),
-            getSensorInfo(gravitySensor, "Gravity", Sensor.TYPE_GRAVITY)
+            getSensorInfo(gravitySensor, "Gravity", Sensor.TYPE_GRAVITY),
+            getSensorInfo(magnetometerSensor, "Magnetometer", Sensor.TYPE_MAGNETIC_FIELD),
+            getSensorInfo(linearAccelSensor, "Linear Acceleration", Sensor.TYPE_LINEAR_ACCELERATION)
         )
     }
 
     fun getInitialStatus(): SensorStatus {
-        val hasAccel = accelerometerSensor != null
-        val hasGyro = gyroscopeSensor != null
-        val hasGameRot = gameRotationSensor != null
-        val hasRotVec = rotationVectorSensor != null
-        val hasGrav = gravitySensor != null
+        val accelType = getSensorHardwareType(accelerometerSensor)
+        val gyroType = getSensorHardwareType(gyroscopeSensor)
+        val gameRotType = getSensorHardwareType(gameRotationSensor)
+        val rotVecType = getSensorHardwareType(rotationVectorSensor)
+        val gravityType = getSensorHardwareType(gravitySensor)
+        val magType = getSensorHardwareType(magnetometerSensor)
+        val linearType = getSensorHardwareType(linearAccelSensor)
+
+        val hasAccel = accelType != SensorHardwareType.UNAVAILABLE
+        val hasGyro = gyroType != SensorHardwareType.UNAVAILABLE
+        val hasGameRot = gameRotType != SensorHardwareType.UNAVAILABLE
+        val hasRotVec = rotVecType != SensorHardwareType.UNAVAILABLE
+        val hasGrav = gravityType != SensorHardwareType.UNAVAILABLE
+        val hasMag = magType != SensorHardwareType.UNAVAILABLE
+        val hasLinear = linearType != SensorHardwareType.UNAVAILABLE
 
         val (resolvedMode, activeName) = resolveModeAndSensor(requestedMode)
 
-        val gyroLabel = if (hasGyro) "ACTIVE" else "UNAVAILABLE"
-        val accelLabel = if (hasAccel) "ACTIVE" else "UNAVAILABLE"
+        val gyroLabel = when (gyroType) {
+            SensorHardwareType.PHYSICAL -> "ACTIVE (PHYSICAL)"
+            SensorHardwareType.LOGICAL -> "LOGICAL SENSOR"
+            else -> "UNAVAILABLE"
+        }
+
+        val accelLabel = when (accelType) {
+            SensorHardwareType.PHYSICAL -> "ACTIVE (PHYSICAL)"
+            SensorHardwareType.LOGICAL -> "LOGICAL SENSOR"
+            else -> "UNAVAILABLE"
+        }
 
         var warningMsg: String? = null
         var errorMsg: String? = null
 
-        if (!hasGameRot && !hasRotVec && !hasGyro) {
-            warningMsg = "Rotation vectors & Gyroscope unavailable — using accelerometer fallback."
+        if (gyroType == SensorHardwareType.LOGICAL && requestedMode == SensorMode.FUSED_GYRO_ACCEL) {
+            warningMsg = "⚠ Physical gyroscope unavailable. Device is using a logical software gyroscope."
+        } else if (!hasGameRot && !hasRotVec && gyroType != SensorHardwareType.PHYSICAL) {
+            warningMsg = "No physical gyroscope detected — using software sensor fusion."
         }
+
         if (!hasAccel) {
             errorMsg = "Accelerometer unavailable — tilt measurement cannot function!"
         }
 
         return SensorStatus(
             hasAccelerometer = hasAccel,
+            accelHardwareType = accelType,
+
             hasGyroscope = hasGyro,
+            gyroHardwareType = gyroType,
+
             hasGameRotationVector = hasGameRot,
+            gameRotHardwareType = gameRotType,
+
             hasRotationVector = hasRotVec,
+            rotVecHardwareType = rotVecType,
+
             hasGravity = hasGrav,
+            gravityHardwareType = gravityType,
+
+            hasMagnetometer = hasMag,
+            magnetometerHardwareType = magType,
+
+            hasLinearAccel = hasLinear,
+            linearAccelHardwareType = linearType,
+
             availableSensors = getAvailableSensorInfos(),
             requestedMode = requestedMode,
             activeMode = resolvedMode,
@@ -110,32 +204,46 @@ class LeanSensorManager(context: Context) : SensorEventListener {
     }
 
     fun resolveModeAndSensor(requested: SensorMode): Pair<SensorMode, String> {
-        val hasGameRot = gameRotationSensor != null
-        val hasRotVec = rotationVectorSensor != null
-        val hasGyro = gyroscopeSensor != null
-        val hasAccel = accelerometerSensor != null
+        val accelType = getSensorHardwareType(accelerometerSensor)
+        val gyroType = getSensorHardwareType(gyroscopeSensor)
+        val gameRotType = getSensorHardwareType(gameRotationSensor)
+        val rotVecType = getSensorHardwareType(rotationVectorSensor)
+
+        val hasGameRot = gameRotType != SensorHardwareType.UNAVAILABLE
+        val hasRotVec = rotVecType != SensorHardwareType.UNAVAILABLE
+        val hasPhysicalGyro = gyroType == SensorHardwareType.PHYSICAL
+        val hasAnyGyro = gyroType != SensorHardwareType.UNAVAILABLE
+        val hasAccel = accelType != SensorHardwareType.UNAVAILABLE
 
         return when (requested) {
             SensorMode.AUTOMATIC -> {
                 when {
-                    hasGameRot -> Pair(SensorMode.GAME_ROTATION_VECTOR, "Game Rotation Vector")
-                    hasRotVec -> Pair(SensorMode.ROTATION_VECTOR, "Rotation Vector")
-                    hasGyro && hasAccel -> Pair(SensorMode.FUSED_GYRO_ACCEL, "Gyroscope + Accelerometer")
+                    // Prefer custom complementary filter if physical accel + physical gyro exist
+                    hasAccel && hasPhysicalGyro -> Pair(SensorMode.FUSED_GYRO_ACCEL, "Gyroscope + Accelerometer (Physical)")
+                    // If no physical gyro, prefer Game Rotation Vector
+                    hasGameRot -> Pair(SensorMode.GAME_ROTATION_VECTOR, "Game Rotation Vector (Fused)")
+                    // Next best: Rotation Vector
+                    hasRotVec -> Pair(SensorMode.ROTATION_VECTOR, "Rotation Vector (Fused)")
+                    // Fallback to logical gyro + accel
+                    hasAccel && hasAnyGyro -> Pair(SensorMode.FUSED_GYRO_ACCEL, "Gyroscope (Logical) + Accelerometer")
+                    // Accelerometer fallback
                     hasAccel -> Pair(SensorMode.ACCEL_ONLY, "Accelerometer Only")
                     else -> Pair(SensorMode.ACCEL_ONLY, "Accelerometer Only")
                 }
             }
             SensorMode.GAME_ROTATION_VECTOR -> {
-                if (hasGameRot) Pair(SensorMode.GAME_ROTATION_VECTOR, "Game Rotation Vector")
+                if (hasGameRot) Pair(SensorMode.GAME_ROTATION_VECTOR, "Game Rotation Vector (Fused)")
                 else resolveModeAndSensor(SensorMode.AUTOMATIC)
             }
             SensorMode.ROTATION_VECTOR -> {
-                if (hasRotVec) Pair(SensorMode.ROTATION_VECTOR, "Rotation Vector")
+                if (hasRotVec) Pair(SensorMode.ROTATION_VECTOR, "Rotation Vector (Fused)")
                 else resolveModeAndSensor(SensorMode.AUTOMATIC)
             }
             SensorMode.FUSED_GYRO_ACCEL -> {
-                if (hasGyro && hasAccel) Pair(SensorMode.FUSED_GYRO_ACCEL, "Gyroscope + Accelerometer")
-                else Pair(SensorMode.ACCEL_ONLY, "Accelerometer Only")
+                if (hasAccel && hasAnyGyro) {
+                    val label = if (hasPhysicalGyro) "Gyroscope + Accelerometer (Physical)" else "Gyroscope (Logical) + Accelerometer"
+                    Pair(SensorMode.FUSED_GYRO_ACCEL, label)
+                } else Pair(SensorMode.ACCEL_ONLY, "Accelerometer Only")
             }
             SensorMode.ACCEL_ONLY -> Pair(SensorMode.ACCEL_ONLY, "Accelerometer Only")
         }
@@ -229,5 +337,3 @@ class LeanSensorManager(context: Context) : SensorEventListener {
         // No-op for high frequency lean measurement
     }
 }
-
-

@@ -81,6 +81,11 @@ class SettingsRepository(context: Context) {
         prefs.edit().putBoolean(KEY_GPS_ENABLED, enabled).apply()
     }
 
+    fun resetToDefaults(): UserSettings {
+        prefs.edit().clear().apply()
+        return getSettings()
+    }
+
     companion object {
         private const val PREFS_NAME = "lean_angle_prefs"
         private const val KEY_THEME_MODE = "app_theme_mode"

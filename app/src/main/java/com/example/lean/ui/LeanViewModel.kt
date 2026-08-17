@@ -24,6 +24,7 @@ import com.example.lean.sensor.SensorStatus
 import com.example.lean.settings.SettingsRepository
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -34,6 +35,9 @@ import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
+import com.example.lean.data.CornerEventEntity
+import com.example.lean.data.CornerEventDao
+
 class LeanViewModel(application: Application) : AndroidViewModel(application), SensorDataListener {
 
     private val sensorManager = LeanSensorManager(application)
@@ -43,7 +47,7 @@ class LeanViewModel(application: Application) : AndroidViewModel(application), S
     private val rideRecorder = RideRecorder(application)
 
     private val database = AppDatabase.getDatabase(application)
-    private val rideRepository = RideRepository(database.rideDao())
+    private val rideRepository = RideRepository(database.rideDao(), database.cornerEventDao())
 
     private val _uiState = MutableStateFlow(LeanState())
     val uiState: StateFlow<LeanState> = _uiState.asStateFlow()
@@ -146,15 +150,20 @@ class LeanViewModel(application: Application) : AndroidViewModel(application), S
             maxSpeedKmh = loc.maxSpeedKmh,
             distanceKm = loc.distanceKm
         )
+        val corners = rideRecorder.lastCompletedCorners
 
         locationManager.stopListening()
 
-        // Automatically save ride locally to Room
+        // Automatically save ride and corners locally to Room
         viewModelScope.launch {
-            rideRepository.saveRide(finalizedRide)
+            rideRepository.saveRide(finalizedRide, corners)
         }
 
         return finalizedRide
+    }
+
+    fun getCornersForRide(rideId: Long): Flow<List<CornerEventEntity>> {
+        return rideRepository.getCornersForRide(rideId)
     }
 
     fun selectHistoricalRide(ride: RideEntity?) {
@@ -220,6 +229,12 @@ class LeanViewModel(application: Application) : AndroidViewModel(application), S
                 isCalibrated = false
             )
         }
+    }
+
+    fun resetSettingsToDefault() {
+        val defaultSettings = settingsRepository.resetToDefaults()
+        _userSettings.value = defaultSettings
+        sensorManager.start(defaultSettings.sensorMode)
     }
 
     fun updateThemeMode(themeMode: AppThemeMode) {
@@ -368,6 +383,17 @@ class LeanViewModel(application: Application) : AndroidViewModel(application), S
                 hasGameRotationVector = status.hasGameRotationVector,
                 hasRotationVector = status.hasRotationVector,
                 hasGravity = status.hasGravity,
+                hasMagnetometer = status.hasMagnetometer,
+                hasLinearAccel = status.hasLinearAccel,
+                isGyroPhysical = status.gyroHardwareType == com.example.lean.sensor.SensorHardwareType.PHYSICAL,
+                isAccelPhysical = status.accelHardwareType == com.example.lean.sensor.SensorHardwareType.PHYSICAL,
+                gyroHardwareType = status.gyroHardwareType,
+                accelHardwareType = status.accelHardwareType,
+                gameRotHardwareType = status.gameRotHardwareType,
+                rotVecHardwareType = status.rotVecHardwareType,
+                gravityHardwareType = status.gravityHardwareType,
+                magnetometerHardwareType = status.magnetometerHardwareType,
+                linearAccelHardwareType = status.linearAccelHardwareType,
                 availableSensors = status.availableSensors,
                 activeMode = status.activeMode,
                 activeSensorName = status.activeSensorName,

@@ -89,27 +89,27 @@ fun DebugSensorScreen(
                 Column(modifier = Modifier.padding(16.dp)) {
                     DebugRow(
                         label = "Accelerometer",
-                        value = if (state.isAccelAvailable) "PRESENT" else "NOT FOUND",
+                        value = state.accelHardwareType.name,
                         isHighlight = state.isAccelAvailable
                     )
                     DebugRow(
                         label = "Gyroscope",
-                        value = if (state.isGyroAvailable) "PRESENT" else "UNAVAILABLE",
-                        isHighlight = state.isGyroAvailable
+                        value = state.gyroHardwareType.name,
+                        isHighlight = state.isGyroPhysical
                     )
                     DebugRow(
                         label = "Game Rotation Vector",
-                        value = if (state.hasGameRotationVector) "PRESENT" else "UNAVAILABLE",
+                        value = state.gameRotHardwareType.name,
                         isHighlight = state.hasGameRotationVector
                     )
                     DebugRow(
                         label = "Rotation Vector",
-                        value = if (state.hasRotationVector) "PRESENT" else "UNAVAILABLE",
+                        value = state.rotVecHardwareType.name,
                         isHighlight = state.hasRotationVector
                     )
                     DebugRow(
                         label = "Gravity",
-                        value = if (state.hasGravity) "PRESENT" else "UNAVAILABLE",
+                        value = state.gravityHardwareType.name,
                         isHighlight = state.hasGravity
                     )
                     DebugRow(

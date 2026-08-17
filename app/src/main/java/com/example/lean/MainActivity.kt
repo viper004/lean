@@ -46,6 +46,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.example.lean.data.CornerEventEntity
 import com.example.lean.data.RideEntity
 import com.example.lean.data.RideState
 import com.example.lean.ui.LeanViewModel
@@ -350,8 +351,10 @@ class MainActivity : ComponentActivity() {
                                     }
 
                                     if (completedRide != null) {
+                                        val corners by viewModel.getCornersForRide(completedRide.rideId).collectAsState(initial = emptyList<CornerEventEntity>())
                                         RideSummaryScreen(
                                             ride = completedRide,
+                                            corners = corners,
                                             isHistoricalView = false,
                                             onDoneClick = {
                                                 viewModel.returnToHomeFromRide()
@@ -383,8 +386,10 @@ class MainActivity : ComponentActivity() {
                                 composable("ride_detail") {
                                     val selectedRide = selectedHistoricalRide
                                     if (selectedRide != null) {
+                                        val corners by viewModel.getCornersForRide(selectedRide.rideId).collectAsState(initial = emptyList<CornerEventEntity>())
                                         RideSummaryScreen(
                                             ride = selectedRide,
+                                            corners = corners,
                                             isHistoricalView = true,
                                             onDoneClick = { navController.popBackStack() },
                                             onBackClick = { navController.popBackStack() }
@@ -410,6 +415,7 @@ class MainActivity : ComponentActivity() {
                                         onGpsEnabledChange = { viewModel.updateGpsEnabled(it) },
                                         onResetCalibration = { viewModel.resetCalibration() },
                                         onResetPeak = { viewModel.resetPeaks() },
+                                        onResetSettings = { viewModel.resetSettingsToDefault() },
                                         onBackClick = { navController.popBackStack() }
                                     )
                                 }
