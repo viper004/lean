@@ -11,5 +11,9 @@ data class FallEventEntity(
     val maxLeanAngle: Float,
     val speedKmh: Float,
     val latitude: Double,
-    val longitude: Double
+    val longitude: Double,
+    val rideId: Long = 0,
+    val smsEnabled: Boolean = false,
+    val smsSent: Boolean = false,
+    val userAcknowledged: Boolean = false
 )

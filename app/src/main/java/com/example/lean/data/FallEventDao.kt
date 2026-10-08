@@ -13,4 +13,7 @@ interface FallEventDao {
 
     @Query("SELECT * FROM fall_events ORDER BY timestampMs DESC")
     fun getAllFallEvents(): Flow<List<FallEventEntity>>
+
+    @Query("UPDATE fall_events SET userAcknowledged = 1 WHERE fallId = :fallId")
+    suspend fun markAcknowledged(fallId: Long)
 }

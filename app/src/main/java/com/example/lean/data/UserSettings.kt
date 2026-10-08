@@ -23,5 +23,7 @@ data class UserSettings(
     val criticalThreshold: Float = 40f,
     val isGpsEnabled: Boolean = true,
     val isFallDetectionEnabled: Boolean = false,
-    val fallDetectionCriticalAngle: Float = 60f
+    val fallDetectionCriticalAngle: Float = 60f,
+    val isEmergencySmsEnabled: Boolean = false,
+    val emergencyPhoneNumber: String = ""
 )

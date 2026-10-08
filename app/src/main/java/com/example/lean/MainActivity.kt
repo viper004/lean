@@ -416,6 +416,13 @@ class MainActivity : ComponentActivity() {
                                         onGpsEnabledChange = { viewModel.updateGpsEnabled(it) },
                                         onFallDetectionEnabledChange = { viewModel.updateFallDetectionEnabled(it) },
                                         onFallDetectionCriticalAngleChange = { viewModel.updateFallDetectionCriticalAngle(it) },
+                                        onEmergencySmsEnabledChange = { viewModel.updateEmergencySmsEnabled(it) },
+                                        onEmergencyPhoneNumberChange = { viewModel.updateEmergencyPhoneNumber(it) },
+                                        onTestEmergencySms = { 
+                                            viewModel.testEmergencySms { success, message ->
+                                                android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_LONG).show()
+                                            }
+                                        },
                                         onResetCalibration = { viewModel.resetCalibration() },
                                         onResetPeak = { viewModel.resetPeaks() },
                                         onResetSettings = { viewModel.resetSettingsToDefault() },

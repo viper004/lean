@@ -24,6 +24,8 @@ class SettingsRepository(context: Context) {
         val isGpsEnabled = prefs.getBoolean(KEY_GPS_ENABLED, true)
         val isFallDetectionEnabled = prefs.getBoolean(KEY_FALL_DETECTION_ENABLED, false)
         val fallDetectionCriticalAngle = prefs.getFloat(KEY_FALL_DETECTION_CRITICAL_ANGLE, 60f)
+        val isEmergencySmsEnabled = prefs.getBoolean(KEY_EMERGENCY_SMS_ENABLED, false)
+        val emergencyPhoneNumber = prefs.getString(KEY_EMERGENCY_PHONE_NUMBER, "") ?: ""
 
         val themeMode = runCatching { AppThemeMode.valueOf(themeName) }.getOrDefault(AppThemeMode.DARK)
         val sensorMode = runCatching { SensorMode.valueOf(modeName) }.getOrDefault(SensorMode.AUTOMATIC)
@@ -41,7 +43,9 @@ class SettingsRepository(context: Context) {
             criticalThreshold = criticalThreshold,
             isGpsEnabled = isGpsEnabled,
             isFallDetectionEnabled = isFallDetectionEnabled,
-            fallDetectionCriticalAngle = fallDetectionCriticalAngle
+            fallDetectionCriticalAngle = fallDetectionCriticalAngle,
+            isEmergencySmsEnabled = isEmergencySmsEnabled,
+            emergencyPhoneNumber = emergencyPhoneNumber
         )
     }
 
@@ -93,6 +97,14 @@ class SettingsRepository(context: Context) {
         prefs.edit().putFloat(KEY_FALL_DETECTION_CRITICAL_ANGLE, value).apply()
     }
 
+    fun saveEmergencySmsEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_EMERGENCY_SMS_ENABLED, enabled).apply()
+    }
+
+    fun saveEmergencyPhoneNumber(number: String) {
+        prefs.edit().putString(KEY_EMERGENCY_PHONE_NUMBER, number).apply()
+    }
+
     fun resetToDefaults(): UserSettings {
         prefs.edit().clear().apply()
         return getSettings()
@@ -112,5 +124,7 @@ class SettingsRepository(context: Context) {
         private const val KEY_GPS_ENABLED = "gps_enabled"
         private const val KEY_FALL_DETECTION_ENABLED = "fall_detection_enabled"
         private const val KEY_FALL_DETECTION_CRITICAL_ANGLE = "fall_detection_critical_angle"
+        private const val KEY_EMERGENCY_SMS_ENABLED = "emergency_sms_enabled"
+        private const val KEY_EMERGENCY_PHONE_NUMBER = "emergency_phone_number"
     }
 }

@@ -1,6 +1,16 @@
 package com.example.lean.ui.screens
 
+import android.Manifest
+import android.content.Context
+import android.content.ContextWrapper
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.provider.Settings
 import android.widget.Toast
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -23,6 +33,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -35,6 +46,7 @@ import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -43,11 +55,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import com.example.lean.data.AppThemeMode
 import com.example.lean.data.SensorMode
 import com.example.lean.data.SmoothingLevel
@@ -59,6 +74,20 @@ import com.example.lean.ui.theme.primaryLime
 import com.example.lean.ui.theme.textMuted
 import com.example.lean.ui.theme.warningAmber
 import java.util.Locale
+
+private enum class PendingSmsAction {
+    ENABLE_TOGGLE,
+    TEST_SMS
+}
+
+private fun Context.findActivity(): ComponentActivity? {
+    var ctx = this
+    while (ctx is ContextWrapper) {
+        if (ctx is ComponentActivity) return ctx
+        ctx = ctx.baseContext
+    }
+    return null
+}
 
 @Composable
 fun SettingsScreen(
@@ -75,6 +104,9 @@ fun SettingsScreen(
     onGpsEnabledChange: (Boolean) -> Unit,
     onFallDetectionEnabledChange: (Boolean) -> Unit,
     onFallDetectionCriticalAngleChange: (Float) -> Unit,
+    onEmergencySmsEnabledChange: (Boolean) -> Unit,
+    onEmergencyPhoneNumberChange: (String) -> Unit,
+    onTestEmergencySms: () -> Unit,
     onResetCalibration: () -> Unit,
     onResetPeak: () -> Unit,
     onResetSettings: (() -> Unit)? = null,
@@ -83,6 +115,64 @@ fun SettingsScreen(
 ) {
     val context = LocalContext.current
     var showDiagnostics by remember { mutableStateOf(false) }
+
+    var pendingSmsAction by remember { mutableStateOf<PendingSmsAction?>(null) }
+    var showPermanentDenialDialog by remember { mutableStateOf(false) }
+
+    val smsPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        val prefs = context.getSharedPreferences("lean_sms_prefs", Context.MODE_PRIVATE)
+        prefs.edit().putBoolean("has_requested_sms", true).apply()
+
+        if (isGranted) {
+            when (pendingSmsAction) {
+                PendingSmsAction.ENABLE_TOGGLE -> {
+                    onEmergencySmsEnabledChange(true)
+                }
+                PendingSmsAction.TEST_SMS -> {
+                    onEmergencySmsEnabledChange(true)
+                    onTestEmergencySms()
+                }
+                null -> {}
+            }
+        } else {
+            Toast.makeText(
+                context,
+                "SMS permission is required to automatically send an emergency SOS message.",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+        pendingSmsAction = null
+    }
+
+    fun handleSmsPermissionCheck(action: PendingSmsAction) {
+        val isGranted = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.SEND_SMS
+        ) == PackageManager.PERMISSION_GRANTED
+
+        if (isGranted) {
+            when (action) {
+                PendingSmsAction.ENABLE_TOGGLE -> onEmergencySmsEnabledChange(true)
+                PendingSmsAction.TEST_SMS -> onTestEmergencySms()
+            }
+        } else {
+            val prefs = context.getSharedPreferences("lean_sms_prefs", Context.MODE_PRIVATE)
+            val hasRequestedBefore = prefs.getBoolean("has_requested_sms", false)
+            val activity = context.findActivity()
+            val showRationale = activity?.let {
+                ActivityCompat.shouldShowRequestPermissionRationale(it, Manifest.permission.SEND_SMS)
+            } ?: false
+
+            if (hasRequestedBefore && !showRationale) {
+                showPermanentDenialDialog = true
+            } else {
+                pendingSmsAction = action
+                smsPermissionLauncher.launch(Manifest.permission.SEND_SMS)
+            }
+        }
+    }
 
     Box(
         modifier = modifier
@@ -443,8 +533,8 @@ fun SettingsScreen(
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // Section 5: Fall Detection
-            SettingsSectionHeader("FALL DETECTION (BETA)")
+            // Section 5: Emergency Assistance
+            SettingsSectionHeader("EMERGENCY ASSISTANCE (BETA)")
             
             Card(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -460,7 +550,7 @@ fun SettingsScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text("Enable Fall Detection", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                            Text("Fall Detection", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                             Text("Estimates possible falls based on lean angle and time.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         androidx.compose.material3.Switch(
@@ -484,12 +574,116 @@ fun SettingsScreen(
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "Alerts if lean exceeds this angle continuously for 10 seconds.",
+                            text = "Confirmation Time: 10 seconds (Fixed)",
                             fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.warningAmber
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+
+                        Spacer(modifier = Modifier.height(16.dp))
+                        androidx.compose.material3.HorizontalDivider(color = MaterialTheme.colorScheme.outline)
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Emergency SMS", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                                Text("Automatically text emergency contact.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            androidx.compose.material3.Switch(
+                                checked = settings.isEmergencySmsEnabled,
+                                onCheckedChange = { checked ->
+                                    if (checked) {
+                                        handleSmsPermissionCheck(PendingSmsAction.ENABLE_TOGGLE)
+                                    } else {
+                                        onEmergencySmsEnabledChange(false)
+                                    }
+                                },
+                                colors = androidx.compose.material3.SwitchDefaults.colors(
+                                    checkedThumbColor = MaterialTheme.colorScheme.primaryCyan,
+                                    checkedTrackColor = MaterialTheme.colorScheme.primaryCyan.copy(alpha = 0.5f)
+                                )
+                            )
+                        }
+
+                        if (settings.isEmergencySmsEnabled) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            androidx.compose.material3.OutlinedTextField(
+                                value = settings.emergencyPhoneNumber,
+                                onValueChange = onEmergencyPhoneNumberChange,
+                                label = { Text("Emergency Phone Number") },
+                                singleLine = true,
+                                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Phone),
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = MaterialTheme.colorScheme.primaryCyan,
+                                    unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                                )
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Button(
+                                onClick = {
+                                    handleSmsPermissionCheck(PendingSmsAction.TEST_SMS)
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth().height(48.dp)
+                            ) {
+                                Text("Test Emergency SMS", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface)
+                            }
+                        }
                     }
                 }
+            }
+
+            if (showPermanentDenialDialog) {
+                AlertDialog(
+                    onDismissRequest = { showPermanentDenialDialog = false },
+                    title = {
+                        Text(
+                            text = "SMS Permission Required",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    },
+                    text = {
+                        Text(
+                            text = "SMS permission is disabled for LEAN.\nPlease enable it in Android Settings to use Emergency SOS.",
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                showPermanentDenialDialog = false
+                                try {
+                                    val intent = Intent(
+                                        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                        Uri.fromParts("package", context.packageName, null)
+                                    )
+                                    context.startActivity(intent)
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "Unable to open Settings", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primaryCyan)
+                        ) {
+                            Text("Open Settings", color = Color.White, fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showPermanentDenialDialog = false }) {
+                            Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    },
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface,
+                    textContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
 
             Spacer(modifier = Modifier.height(20.dp))

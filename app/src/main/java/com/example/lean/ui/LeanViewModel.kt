@@ -88,6 +88,7 @@ class LeanViewModel(application: Application) : AndroidViewModel(application), S
 
     private var fallDetectionStartTimeMs: Long? = null
     private var currentFallMaxAngle: Float = 0f
+    private var smsCountdownJob: Job? = null
 
     init {
         val loadedSettings = settingsRepository.getSettings()
@@ -222,8 +223,53 @@ class LeanViewModel(application: Application) : AndroidViewModel(application), S
         }
     }
 
+    private fun startSmsCountdown(event: com.example.lean.data.FallEventEntity) {
+        smsCountdownJob?.cancel()
+        smsCountdownJob = viewModelScope.launch {
+            for (i in 10 downTo 1) {
+                _uiState.update { it.copy(fallDetectionSmsCountdown = i) }
+                delay(1000)
+            }
+            _uiState.update { it.copy(fallDetectionSmsCountdown = 0) }
+            
+            val smsManager = try {
+                if (android.os.Build.VERSION.SDK_INT >= 31) {
+                    getApplication<Application>().getSystemService(android.telephony.SmsManager::class.java)
+                } else {
+                    android.telephony.SmsManager.getDefault()
+                }
+            } catch (e: Exception) {
+                null
+            }
+
+            if (smsManager != null) {
+                try {
+                    val timeString = java.text.SimpleDateFormat("hh:mm:ss a", java.util.Locale.US).format(java.util.Date(event.timestampMs))
+                    var message = "LEAN Emergency Alert:\nPossible motorcycle fall detected.\n\nLean angle: ${event.maxLeanAngle.toInt()}°\nSpeed: ${event.speedKmh.toInt()} km/h\nTime: $timeString\n\nLocation:\n"
+                    if (event.latitude != 0.0 && event.longitude != 0.0) {
+                        message += "https://maps.google.com/?q=${event.latitude},${event.longitude}\n\nPlease check on the rider."
+                    } else {
+                        message += "Unavailable.\n\nPlease check on the rider."
+                    }
+                    val parts = smsManager.divideMessage(message)
+                    smsManager.sendMultipartTextMessage(_userSettings.value.emergencyPhoneNumber, null, parts, null, null)
+                    rideRepository.saveFallEvent(event.copy(smsSent = true))
+                } catch (e: Exception) {
+                    // Ignore, prevent crash
+                }
+            }
+        }
+    }
+
     fun dismissFallDetection() {
-        _uiState.update { it.copy(possibleFallDetected = false) }
+        smsCountdownJob?.cancel()
+        val currentEventId = _uiState.value.currentFallEventId
+        if (currentEventId != null) {
+            viewModelScope.launch {
+                rideRepository.markFallEventAcknowledged(currentEventId)
+            }
+        }
+        _uiState.update { it.copy(possibleFallDetected = false, fallDetectionSmsCountdown = null) }
     }
 
     fun resetPeaks() {
@@ -313,6 +359,47 @@ class LeanViewModel(application: Application) : AndroidViewModel(application), S
     fun updateFallDetectionCriticalAngle(angle: Float) {
         settingsRepository.saveFallDetectionCriticalAngle(angle)
         _userSettings.update { it.copy(fallDetectionCriticalAngle = angle) }
+    }
+
+    fun updateEmergencySmsEnabled(enabled: Boolean) {
+        settingsRepository.saveEmergencySmsEnabled(enabled)
+        _userSettings.update { it.copy(isEmergencySmsEnabled = enabled) }
+    }
+
+    fun updateEmergencyPhoneNumber(number: String) {
+        val cleanNumber = number.replace(Regex("[^+\\d]"), "")
+        settingsRepository.saveEmergencyPhoneNumber(cleanNumber)
+        _userSettings.update { it.copy(emergencyPhoneNumber = cleanNumber) }
+    }
+
+    fun testEmergencySms(onResult: (Boolean, String) -> Unit) {
+        val number = _userSettings.value.emergencyPhoneNumber
+        if (number.isEmpty()) {
+            onResult(false, "Emergency phone number is empty.")
+            return
+        }
+        val smsManager = try {
+            if (android.os.Build.VERSION.SDK_INT >= 31) {
+                getApplication<Application>().getSystemService(android.telephony.SmsManager::class.java)
+            } else {
+                android.telephony.SmsManager.getDefault()
+            }
+        } catch (e: Exception) {
+            null
+        }
+
+        if (smsManager != null) {
+            try {
+                val message = "LEAN Test Alert:\nThis is a test message from LEAN emergency assistance.\nNo crash has been detected.\n\nThis is only for testing the emergency SMS configuration."
+                val parts = smsManager.divideMessage(message)
+                smsManager.sendMultipartTextMessage(number, null, parts, null, null)
+                onResult(true, "Test SMS sent.")
+            } catch (e: Exception) {
+                onResult(false, "Failed to send SMS. Check permissions.")
+            }
+        } else {
+            onResult(false, "SMS Manager not available.")
+        }
     }
 
     private var lastDebugLogTimestamp = 0L
@@ -413,10 +500,13 @@ class LeanViewModel(application: Application) : AndroidViewModel(application), S
                                     fallDetectionTimeMs = now,
                                     fallDetectionSpeedKmh = effectiveSpeedKmh,
                                     fallDetectionLat = if (loc.isGpsActive) loc.latitude else null,
-                                    fallDetectionLng = if (loc.isGpsActive) loc.longitude else null
+                                    fallDetectionLng = if (loc.isGpsActive) loc.longitude else null,
+                                    fallDetectionSmsCountdown = if (_userSettings.value.isEmergencySmsEnabled && _userSettings.value.emergencyPhoneNumber.isNotEmpty()) 10 else null,
+                                    currentFallEventId = null
                                 )
                             }
                             val finalMaxAngle = currentFallMaxAngle
+                            val smsEnabled = _userSettings.value.isEmergencySmsEnabled && _userSettings.value.emergencyPhoneNumber.isNotEmpty()
                             fallDetectionStartTimeMs = null
                             currentFallMaxAngle = 0f
                             
@@ -426,9 +516,15 @@ class LeanViewModel(application: Application) : AndroidViewModel(application), S
                                     maxLeanAngle = finalMaxAngle,
                                     speedKmh = effectiveSpeedKmh,
                                     latitude = if (loc.isGpsActive) loc.latitude ?: 0.0 else 0.0,
-                                    longitude = if (loc.isGpsActive) loc.longitude ?: 0.0 else 0.0
+                                    longitude = if (loc.isGpsActive) loc.longitude ?: 0.0 else 0.0,
+                                    smsEnabled = smsEnabled
                                 )
-                                rideRepository.saveFallEvent(event)
+                                val eventId = rideRepository.saveFallEvent(event)
+                                _uiState.update { it.copy(currentFallEventId = eventId) }
+
+                                if (smsEnabled) {
+                                    startSmsCountdown(event.copy(fallId = eventId))
+                                }
                             }
                         }
                     }

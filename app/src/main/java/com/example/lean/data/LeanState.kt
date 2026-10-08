@@ -43,7 +43,9 @@ data class LeanState(
     val fallDetectionTimeMs: Long = 0L,
     val fallDetectionSpeedKmh: Float = 0f,
     val fallDetectionLat: Double? = null,
-    val fallDetectionLng: Double? = null
+    val fallDetectionLng: Double? = null,
+    val fallDetectionSmsCountdown: Int? = null,
+    val currentFallEventId: Long? = null
 ) {
     /**
      * Integer lean angle after dead zone threshold and rounding to whole degrees.

@@ -141,6 +141,22 @@ fun LiveRideScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
+                    if (leanState.fallDetectionSmsCountdown != null) {
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = "Emergency SMS will be sent in:",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "${leanState.fallDetectionSmsCountdown} seconds",
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
                 }
             },
             confirmButton = {
@@ -152,8 +168,10 @@ fun LiveRideScreen(
                 }
             },
             dismissButton = {
-                TextButton(onClick = onDismissFallDetection) {
-                    Text("Dismiss", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (leanState.fallDetectionSmsCountdown == null) {
+                    TextButton(onClick = onDismissFallDetection) {
+                        Text("Dismiss", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
             },
             containerColor = MaterialTheme.colorScheme.surface,

@@ -29,8 +29,12 @@ class RideRepository(
         return rideId
     }
 
-    suspend fun saveFallEvent(event: com.example.lean.data.FallEventEntity) {
-        fallEventDao.insertFallEvent(event)
+    suspend fun saveFallEvent(event: com.example.lean.data.FallEventEntity): Long {
+        return fallEventDao.insertFallEvent(event)
+    }
+
+    suspend fun markFallEventAcknowledged(fallId: Long) {
+        fallEventDao.markAcknowledged(fallId)
     }
 
     suspend fun getRideById(rideId: Long): RideEntity? {
