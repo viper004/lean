@@ -73,6 +73,8 @@ fun SettingsScreen(
     onWarningThresholdChange: (Float) -> Unit,
     onCriticalThresholdChange: (Float) -> Unit,
     onGpsEnabledChange: (Boolean) -> Unit,
+    onFallDetectionEnabledChange: (Boolean) -> Unit,
+    onFallDetectionCriticalAngleChange: (Float) -> Unit,
     onResetCalibration: () -> Unit,
     onResetPeak: () -> Unit,
     onResetSettings: (() -> Unit)? = null,
@@ -441,7 +443,58 @@ fun SettingsScreen(
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // Section 5: Calibration & Settings Reset Controls
+            // Section 5: Fall Detection
+            SettingsSectionHeader("FALL DETECTION (BETA)")
+            
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(16.dp))
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Enable Fall Detection", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                            Text("Estimates possible falls based on lean angle and time.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        androidx.compose.material3.Switch(
+                            checked = settings.isFallDetectionEnabled,
+                            onCheckedChange = onFallDetectionEnabledChange,
+                            colors = androidx.compose.material3.SwitchDefaults.colors(
+                                checkedThumbColor = MaterialTheme.colorScheme.primaryCyan,
+                                checkedTrackColor = MaterialTheme.colorScheme.primaryCyan.copy(alpha = 0.5f)
+                            )
+                        )
+                    }
+
+                    if (settings.isFallDetectionEnabled) {
+                        Spacer(modifier = Modifier.height(16.dp))
+                        ThresholdSlider(
+                            title = "Critical Angle",
+                            value = settings.fallDetectionCriticalAngle,
+                            range = 40f..85f,
+                            unit = "°",
+                            onValueChange = onFallDetectionCriticalAngleChange
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Alerts if lean exceeds this angle continuously for 10 seconds.",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.warningAmber
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            // Section 6: Calibration & Settings Reset Controls
             SettingsSectionHeader("RESET CONTROLS")
 
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {

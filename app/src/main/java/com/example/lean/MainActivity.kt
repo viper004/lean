@@ -340,7 +340,8 @@ class MainActivity : ComponentActivity() {
                                             navController.navigate("ride_summary") {
                                                 popUpTo("home") { inclusive = false }
                                             }
-                                        }
+                                        },
+                                        onDismissFallDetection = { viewModel.dismissFallDetection() }
                                     )
                                 }
 
@@ -413,6 +414,8 @@ class MainActivity : ComponentActivity() {
                                         onWarningThresholdChange = { viewModel.updateWarningThreshold(it) },
                                         onCriticalThresholdChange = { viewModel.updateCriticalThreshold(it) },
                                         onGpsEnabledChange = { viewModel.updateGpsEnabled(it) },
+                                        onFallDetectionEnabledChange = { viewModel.updateFallDetectionEnabled(it) },
+                                        onFallDetectionCriticalAngleChange = { viewModel.updateFallDetectionCriticalAngle(it) },
                                         onResetCalibration = { viewModel.resetCalibration() },
                                         onResetPeak = { viewModel.resetPeaks() },
                                         onResetSettings = { viewModel.resetSettingsToDefault() },

@@ -37,7 +37,13 @@ data class LeanState(
     val activeSensorLabel: String = "Initializing...",
     val rawAccel: Triple<Float, Float, Float> = Triple(0f, 0f, 0f),
     val rawGyro: Triple<Float, Float, Float> = Triple(0f, 0f, 0f),
-    val sensorFps: Int = 0
+    val sensorFps: Int = 0,
+    val possibleFallDetected: Boolean = false,
+    val fallDetectionMaxAngle: Float = 0f,
+    val fallDetectionTimeMs: Long = 0L,
+    val fallDetectionSpeedKmh: Float = 0f,
+    val fallDetectionLat: Double? = null,
+    val fallDetectionLng: Double? = null
 ) {
     /**
      * Integer lean angle after dead zone threshold and rounding to whole degrees.

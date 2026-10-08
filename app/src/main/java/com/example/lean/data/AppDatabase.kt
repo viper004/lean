@@ -6,13 +6,14 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 
 @Database(
-    entities = [RideEntity::class, CornerEventEntity::class],
-    version = 2,
+    entities = [RideEntity::class, CornerEventEntity::class, FallEventEntity::class],
+    version = 3,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun rideDao(): RideDao
     abstract fun cornerEventDao(): CornerEventDao
+    abstract fun fallEventDao(): FallEventDao
 
     companion object {
         @Volatile

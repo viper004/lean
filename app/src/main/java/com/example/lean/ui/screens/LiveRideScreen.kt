@@ -66,6 +66,7 @@ fun LiveRideScreen(
     isGpsSettingEnabled: Boolean,
     onReCenterClick: () -> Unit,
     onEndRideConfirmed: () -> Unit,
+    onDismissFallDetection: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var showEndRideDialog by remember { mutableStateOf(false) }
@@ -106,6 +107,57 @@ fun LiveRideScreen(
             },
             containerColor = MaterialTheme.colorScheme.surface,
             titleContentColor = MaterialTheme.colorScheme.onSurface,
+            textContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+
+    if (leanState.possibleFallDetected) {
+        AlertDialog(
+            onDismissRequest = { },
+            title = {
+                Text(
+                    text = "POSSIBLE FALL DETECTED",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.error
+                )
+            },
+            text = {
+                Column {
+                    Text(
+                        text = "Maximum Angle: ${String.format(Locale.US, "%.0f°", leanState.fallDetectionMaxAngle)}",
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "Speed at Detection: ${String.format(Locale.US, "%.0f km/h", leanState.fallDetectionSpeedKmh)}",
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (leanState.fallDetectionLat != null && leanState.fallDetectionLng != null) {
+                        Text(
+                            text = "Location: ${String.format(Locale.US, "%.5f, %.5f", leanState.fallDetectionLat, leanState.fallDetectionLng)}",
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = onDismissFallDetection,
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primaryCyan)
+                ) {
+                    Text("I'm OK", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = onDismissFallDetection) {
+                    Text("Dismiss", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            },
+            containerColor = MaterialTheme.colorScheme.surface,
+            titleContentColor = MaterialTheme.colorScheme.error,
             textContentColor = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }

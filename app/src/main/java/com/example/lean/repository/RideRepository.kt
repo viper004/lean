@@ -4,11 +4,13 @@ import com.example.lean.data.CornerEventDao
 import com.example.lean.data.CornerEventEntity
 import com.example.lean.data.RideDao
 import com.example.lean.data.RideEntity
+import com.example.lean.data.FallEventDao
 import kotlinx.coroutines.flow.Flow
 
 class RideRepository(
     private val rideDao: RideDao,
-    private val cornerEventDao: CornerEventDao
+    private val cornerEventDao: CornerEventDao,
+    private val fallEventDao: FallEventDao
 ) {
 
     val allRides: Flow<List<RideEntity>> = rideDao.getAllRides()
@@ -25,6 +27,10 @@ class RideRepository(
             cornerEventDao.insertCorners(updatedCorners)
         }
         return rideId
+    }
+
+    suspend fun saveFallEvent(event: com.example.lean.data.FallEventEntity) {
+        fallEventDao.insertFallEvent(event)
     }
 
     suspend fun getRideById(rideId: Long): RideEntity? {

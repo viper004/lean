@@ -270,4 +270,18 @@ class RideAnalyticsTest {
         assertEquals("RECORDING", stateRecording.name)
         assertEquals("COMPLETED", stateCompleted.name)
     }
+
+    // Test 18: Speed unit conversion & moving average speed validation
+    @Test
+    fun testSpeedUnitConversionAndMovingAverage() {
+        val mps = 16.6667f // ~60 km/h
+        val kmh = mps * 3.6f
+        assertEquals(60.0f, kmh, 0.1f)
+
+        // 10 km distance traveled over 10 min (600,000 ms) moving time -> 60 km/h average moving speed
+        val distKm = 10f
+        val movingDurationMs = 600000L
+        val avgMovingSpeed = distKm / (movingDurationMs / 3600000f)
+        assertEquals(60.0f, avgMovingSpeed, 0.1f)
+    }
 }

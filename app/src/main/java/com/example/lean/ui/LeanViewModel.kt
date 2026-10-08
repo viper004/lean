@@ -47,7 +47,7 @@ class LeanViewModel(application: Application) : AndroidViewModel(application), S
     private val rideRecorder = RideRecorder(application)
 
     private val database = AppDatabase.getDatabase(application)
-    private val rideRepository = RideRepository(database.rideDao(), database.cornerEventDao())
+    private val rideRepository = RideRepository(database.rideDao(), database.cornerEventDao(), database.fallEventDao())
 
     private val _uiState = MutableStateFlow(LeanState())
     val uiState: StateFlow<LeanState> = _uiState.asStateFlow()
@@ -86,6 +86,9 @@ class LeanViewModel(application: Application) : AndroidViewModel(application), S
     private var frameCount = 0
     private var lastFpsTimestamp = System.currentTimeMillis()
 
+    private var fallDetectionStartTimeMs: Long? = null
+    private var currentFallMaxAngle: Float = 0f
+
     init {
         val loadedSettings = settingsRepository.getSettings()
         _userSettings.value = loadedSettings
@@ -122,9 +125,13 @@ class LeanViewModel(application: Application) : AndroidViewModel(application), S
                 isCalibrated = true,
                 showCenteredFeedback = true,
                 maxLeftDegrees = 0f,
-                maxRightDegrees = 0f
+                maxRightDegrees = 0f,
+                possibleFallDetected = false
             )
         }
+
+        fallDetectionStartTimeMs = null
+        currentFallMaxAngle = 0f
 
         // Step 2: Reset GPS stats if enabled
         if (_userSettings.value.isGpsEnabled) {
@@ -148,11 +155,13 @@ class LeanViewModel(application: Application) : AndroidViewModel(application), S
         val finalizedRide = rideRecorder.endRide(
             currentSpeedKmh = loc.currentSpeedKmh,
             maxSpeedKmh = loc.maxSpeedKmh,
-            distanceKm = loc.distanceKm
+            distanceKm = loc.distanceKm,
+            movingDurationMs = loc.movingDurationMs
         )
         val corners = rideRecorder.lastCompletedCorners
 
         locationManager.stopListening()
+        fallDetectionStartTimeMs = null
 
         // Automatically save ride and corners locally to Room
         viewModelScope.launch {
@@ -191,6 +200,8 @@ class LeanViewModel(application: Application) : AndroidViewModel(application), S
     fun returnToHomeFromRide() {
         rideRecorder.resetToIdle()
         locationManager.stopListening()
+        fallDetectionStartTimeMs = null
+        _uiState.update { it.copy(possibleFallDetected = false) }
     }
 
     fun calibrateZero() {
@@ -209,6 +220,10 @@ class LeanViewModel(application: Application) : AndroidViewModel(application), S
             delay(1000)
             _uiState.update { it.copy(showCenteredFeedback = false) }
         }
+    }
+
+    fun dismissFallDetection() {
+        _uiState.update { it.copy(possibleFallDetected = false) }
     }
 
     fun resetPeaks() {
@@ -286,6 +301,20 @@ class LeanViewModel(application: Application) : AndroidViewModel(application), S
         }
     }
 
+    fun updateFallDetectionEnabled(enabled: Boolean) {
+        settingsRepository.saveFallDetectionEnabled(enabled)
+        _userSettings.update { it.copy(isFallDetectionEnabled = enabled) }
+        if (!enabled) {
+            _uiState.update { it.copy(possibleFallDetected = false) }
+            fallDetectionStartTimeMs = null
+        }
+    }
+
+    fun updateFallDetectionCriticalAngle(angle: Float) {
+        settingsRepository.saveFallDetectionCriticalAngle(angle)
+        _userSettings.update { it.copy(fallDetectionCriticalAngle = angle) }
+    }
+
     private var lastDebugLogTimestamp = 0L
     private var previousRawLeanAngle = 0f
 
@@ -353,12 +382,64 @@ class LeanViewModel(application: Application) : AndroidViewModel(application), S
         // Tick processing for active ride recording
         if (activeRideSession.value.rideState == RideState.RECORDING) {
             val loc = locationManager.locationData.value
+            val nowMonoMs = android.os.SystemClock.elapsedRealtime()
+            val isFresh = loc.isSpeedValid && (nowMonoMs - loc.speedTimestampMs <= 3000L)
+            val effectiveSpeedKmh = if (isFresh) loc.currentSpeedKmh else 0f
+
             rideRecorder.onSensorTick(
                 currentLeanDegrees = newFiltered,
-                currentSpeedKmh = loc.currentSpeedKmh,
+                currentSpeedKmh = effectiveSpeedKmh,
                 maxSpeedKmh = loc.maxSpeedKmh,
                 distanceKm = loc.distanceKm
             )
+            
+            // Fall Detection Logic
+            if (_userSettings.value.isFallDetectionEnabled && !_uiState.value.possibleFallDetected) {
+                val criticalThreshold = _userSettings.value.fallDetectionCriticalAngle
+                if (abs(newFiltered) >= criticalThreshold) {
+                    if (fallDetectionStartTimeMs == null) {
+                        fallDetectionStartTimeMs = nowMonoMs
+                        currentFallMaxAngle = abs(newFiltered)
+                    } else {
+                        if (abs(newFiltered) > currentFallMaxAngle) {
+                            currentFallMaxAngle = abs(newFiltered)
+                        }
+                        if (nowMonoMs - fallDetectionStartTimeMs!! >= 10000L) {
+                            // Trigger Fall Detected
+                            _uiState.update { state ->
+                                state.copy(
+                                    possibleFallDetected = true,
+                                    fallDetectionMaxAngle = currentFallMaxAngle,
+                                    fallDetectionTimeMs = now,
+                                    fallDetectionSpeedKmh = effectiveSpeedKmh,
+                                    fallDetectionLat = if (loc.isGpsActive) loc.latitude else null,
+                                    fallDetectionLng = if (loc.isGpsActive) loc.longitude else null
+                                )
+                            }
+                            val finalMaxAngle = currentFallMaxAngle
+                            fallDetectionStartTimeMs = null
+                            currentFallMaxAngle = 0f
+                            
+                            viewModelScope.launch {
+                                val event = com.example.lean.data.FallEventEntity(
+                                    timestampMs = now,
+                                    maxLeanAngle = finalMaxAngle,
+                                    speedKmh = effectiveSpeedKmh,
+                                    latitude = if (loc.isGpsActive) loc.latitude ?: 0.0 else 0.0,
+                                    longitude = if (loc.isGpsActive) loc.longitude ?: 0.0 else 0.0
+                                )
+                                rideRepository.saveFallEvent(event)
+                            }
+                        }
+                    }
+                } else {
+                    fallDetectionStartTimeMs = null
+                    currentFallMaxAngle = 0f
+                }
+            } else if (!_userSettings.value.isFallDetectionEnabled) {
+                fallDetectionStartTimeMs = null
+                currentFallMaxAngle = 0f
+            }
         }
 
         _uiState.update { state ->

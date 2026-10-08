@@ -22,6 +22,8 @@ class SettingsRepository(context: Context) {
         val warningThreshold = prefs.getFloat(KEY_WARNING_THRESHOLD, 30f)
         val criticalThreshold = prefs.getFloat(KEY_CRITICAL_THRESHOLD, 40f)
         val isGpsEnabled = prefs.getBoolean(KEY_GPS_ENABLED, true)
+        val isFallDetectionEnabled = prefs.getBoolean(KEY_FALL_DETECTION_ENABLED, false)
+        val fallDetectionCriticalAngle = prefs.getFloat(KEY_FALL_DETECTION_CRITICAL_ANGLE, 60f)
 
         val themeMode = runCatching { AppThemeMode.valueOf(themeName) }.getOrDefault(AppThemeMode.DARK)
         val sensorMode = runCatching { SensorMode.valueOf(modeName) }.getOrDefault(SensorMode.AUTOMATIC)
@@ -37,7 +39,9 @@ class SettingsRepository(context: Context) {
             preferredMaxLeanThreshold = preferredMaxLeanThreshold,
             warningThreshold = warningThreshold,
             criticalThreshold = criticalThreshold,
-            isGpsEnabled = isGpsEnabled
+            isGpsEnabled = isGpsEnabled,
+            isFallDetectionEnabled = isFallDetectionEnabled,
+            fallDetectionCriticalAngle = fallDetectionCriticalAngle
         )
     }
 
@@ -81,6 +85,14 @@ class SettingsRepository(context: Context) {
         prefs.edit().putBoolean(KEY_GPS_ENABLED, enabled).apply()
     }
 
+    fun saveFallDetectionEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_FALL_DETECTION_ENABLED, enabled).apply()
+    }
+
+    fun saveFallDetectionCriticalAngle(value: Float) {
+        prefs.edit().putFloat(KEY_FALL_DETECTION_CRITICAL_ANGLE, value).apply()
+    }
+
     fun resetToDefaults(): UserSettings {
         prefs.edit().clear().apply()
         return getSettings()
@@ -98,5 +110,7 @@ class SettingsRepository(context: Context) {
         private const val KEY_WARNING_THRESHOLD = "warning_threshold"
         private const val KEY_CRITICAL_THRESHOLD = "critical_threshold"
         private const val KEY_GPS_ENABLED = "gps_enabled"
+        private const val KEY_FALL_DETECTION_ENABLED = "fall_detection_enabled"
+        private const val KEY_FALL_DETECTION_CRITICAL_ANGLE = "fall_detection_critical_angle"
     }
 }

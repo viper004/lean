@@ -21,5 +21,7 @@ data class UserSettings(
     val preferredMaxLeanThreshold: Float = 30f,
     val warningThreshold: Float = 30f,
     val criticalThreshold: Float = 40f,
-    val isGpsEnabled: Boolean = true
+    val isGpsEnabled: Boolean = true,
+    val isFallDetectionEnabled: Boolean = false,
+    val fallDetectionCriticalAngle: Float = 60f
 )

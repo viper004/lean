@@ -128,7 +128,12 @@ class RideRecorder(context: Context) {
         }
     }
 
-    fun endRide(currentSpeedKmh: Float = 0f, maxSpeedKmh: Float = 0f, distanceKm: Float = 0f): RideEntity {
+    fun endRide(
+        currentSpeedKmh: Float = 0f,
+        maxSpeedKmh: Float = 0f,
+        distanceKm: Float = 0f,
+        movingDurationMs: Long = 0L
+    ): RideEntity {
         _sessionState.update { it.copy(rideState = RideState.FINISHING) }
 
         val nowSysMs = System.currentTimeMillis()
@@ -136,9 +141,10 @@ class RideRecorder(context: Context) {
         var finalizedEntity = calculator.finish(nowSysMs)
         lastCompletedCorners = cornerDetector.finishRide(nowMonoMs)
 
-        // Attach GPS stats
-        val avgSpeed = if (finalizedEntity.durationMs > 0 && distanceKm > 0) {
-            (distanceKm / (finalizedEntity.durationMs / 3600000f))
+        // Attach GPS stats using moving duration when available
+        val effectiveDurationMs = if (movingDurationMs > 0L) movingDurationMs else finalizedEntity.durationMs
+        val avgSpeed = if (effectiveDurationMs > 0L && distanceKm > 0f) {
+            (distanceKm / (effectiveDurationMs / 3600000f))
         } else 0f
 
         finalizedEntity = finalizedEntity.copy(
