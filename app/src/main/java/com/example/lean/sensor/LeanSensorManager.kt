@@ -246,6 +246,7 @@ class LeanSensorManager(context: Context) : SensorEventListener {
                 } else Pair(SensorMode.ACCEL_ONLY, "Accelerometer Only")
             }
             SensorMode.ACCEL_ONLY -> Pair(SensorMode.ACCEL_ONLY, "Accelerometer Only")
+            SensorMode.EXTERNAL_BLE -> Pair(SensorMode.EXTERNAL_BLE, "ESP32 IoT Sensor (BLE)")
         }
     }
 
@@ -286,6 +287,9 @@ class LeanSensorManager(context: Context) : SensorEventListener {
                     systemSensorManager.registerListener(this, accelerometerSensor, SensorManager.SENSOR_DELAY_GAME)
                     Log.d("LeanSensorManager", "Registered ONLY: Sensor.TYPE_ACCELEROMETER")
                 }
+            }
+            SensorMode.EXTERNAL_BLE -> {
+                Log.d("LeanSensorManager", "External BLE mode active — internal phone sensors not registered")
             }
         }
 

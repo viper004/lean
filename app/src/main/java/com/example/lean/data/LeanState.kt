@@ -45,13 +45,30 @@ data class LeanState(
     val fallDetectionLat: Double? = null,
     val fallDetectionLng: Double? = null,
     val fallDetectionSmsCountdown: Int? = null,
-    val currentFallEventId: Long? = null
+    val currentFallEventId: Long? = null,
+    // BLE integration fields
+    val bleConnectionState: com.example.lean.bluetooth.BleConnectionState = com.example.lean.bluetooth.BleConnectionState.DISCONNECTED,
+    val bleDeviceName: String? = null,
+    val bleDeviceAddress: String? = null,
+    val bleLastPacket: com.example.lean.bluetooth.BlePacket? = null,
+    val bleErrorMessage: String? = null,
+    val isBleSensorActive: Boolean = false,
+    val isExternalSensorConnected: Boolean = false
 ) {
+    /**
+     * Whether telemetry data is actively available from the current sensor source.
+     */
+    val isTelemetryAvailable: Boolean
+        get() = if (isBleSensorActive) isExternalSensorConnected else true
+
     /**
      * Integer lean angle after dead zone threshold and rounding to whole degrees.
      */
     val displayAngleDegrees: Int
         get() {
+            if (isBleSensorActive && !isExternalSensorConnected) {
+                return 0
+            }
             if (abs(filteredAngleDegrees) <= deadZoneThresholdDegrees) {
                 return 0
             }
@@ -59,14 +76,22 @@ data class LeanState(
         }
 
     val directionText: String
-        get() = when {
-            displayAngleDegrees > 0 -> "RIGHT"
-            displayAngleDegrees < 0 -> "LEFT"
-            else -> "LEVEL"
+        get() {
+            if (isBleSensorActive && !isExternalSensorConnected) {
+                return "SIGNAL LOST"
+            }
+            return when {
+                displayAngleDegrees > 0 -> "RIGHT"
+                displayAngleDegrees < 0 -> "LEFT"
+                else -> "LEVEL"
+            }
         }
 
     val displayAngleText: String
         get() {
+            if (isBleSensorActive && !isExternalSensorConnected) {
+                return "−−°"
+            }
             val angle = displayAngleDegrees
             val absAngle = abs(angle)
             val sign = if (angle > 0) "+" else if (angle < 0) "−" else ""

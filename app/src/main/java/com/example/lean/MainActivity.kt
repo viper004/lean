@@ -318,9 +318,11 @@ class MainActivity : ComponentActivity() {
                                         locationData = locationData,
                                         isGpsSettingEnabled = userSettings.isGpsEnabled,
                                         onCenterAndStartClick = {
-                                            viewModel.centerAndStartRide()
-                                            navController.navigate("live_ride") {
-                                                popUpTo("home") { inclusive = false }
+                                            val started = viewModel.centerAndStartRide()
+                                            if (started) {
+                                                navController.navigate("live_ride") {
+                                                    popUpTo("home") { inclusive = false }
+                                                }
                                             }
                                         },
                                         onBackClick = { navController.popBackStack() }
@@ -426,6 +428,9 @@ class MainActivity : ComponentActivity() {
                                         onResetCalibration = { viewModel.resetCalibration() },
                                         onResetPeak = { viewModel.resetPeaks() },
                                         onResetSettings = { viewModel.resetSettingsToDefault() },
+                                        onStartBleScan = { viewModel.startBleScan() },
+                                        onStopBleScan = { viewModel.stopBleScan() },
+                                        onDisconnectBle = { viewModel.disconnectBle() },
                                         onBackClick = { navController.popBackStack() }
                                     )
                                 }

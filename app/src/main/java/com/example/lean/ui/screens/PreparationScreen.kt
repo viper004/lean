@@ -18,8 +18,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Bluetooth
+import androidx.compose.material.icons.filled.BluetoothConnected
+import androidx.compose.material.icons.filled.BluetoothDisabled
 import androidx.compose.material.icons.filled.CompassCalibration
 import androidx.compose.material.icons.filled.PhonelinkSetup
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -114,7 +118,10 @@ fun PreparationScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // Phone Mounting Notice Card
+            // Phone / ESP32 Mounting Notice Card
+            val isBleMode = leanState.activeMode == com.example.lean.data.SensorMode.EXTERNAL_BLE
+            val canStart = if (isBleMode) leanState.isExternalSensorConnected else true
+
             Card(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 shape = RoundedCornerShape(16.dp),
@@ -127,25 +134,67 @@ fun PreparationScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
-                        imageVector = Icons.Default.PhonelinkSetup,
-                        contentDescription = "Mount Phone",
+                        imageVector = if (isBleMode) Icons.Default.BluetoothConnected else Icons.Default.PhonelinkSetup,
+                        contentDescription = if (isBleMode) "ESP32 Sensor" else "Mount Phone",
                         tint = MaterialTheme.colorScheme.primaryCyan,
                         modifier = Modifier.size(32.dp)
                     )
                     Spacer(modifier = Modifier.width(16.dp))
                     Column {
                         Text(
-                            text = "Phone Mounting",
+                            text = if (isBleMode) "ESP32 IoT Sensor" else "Phone Mounting",
                             fontSize = 15.sp,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "Any orientation is supported. Pressing CENTER & START will define the current position as 0° reference.",
+                            text = if (isBleMode) {
+                                "Ensure your ESP32 sensor is powered on and secured to the motorcycle frame or handlebar. Pressing CENTER & START will define current upright motorcycle position as 0°."
+                            } else {
+                                "Any orientation is supported. Pressing CENTER & START will define the current position as 0° reference."
+                            },
                             fontSize = 13.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                    }
+                }
+            }
+
+            if (isBleMode && !canStart) {
+                Spacer(modifier = Modifier.height(16.dp))
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(1.dp, MaterialTheme.colorScheme.warningAmber, RoundedCornerShape(16.dp))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.BluetoothDisabled,
+                            contentDescription = "Sensor Disconnected",
+                            tint = MaterialTheme.colorScheme.warningAmber,
+                            modifier = Modifier.size(28.dp)
+                        )
+                        Spacer(modifier = Modifier.width(14.dp))
+                        Column {
+                            Text(
+                                text = "ESP32 Sensor Disconnected",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.warningAmber
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "An active connection to LEAN_IOT is required to start a ride in External BLE mode. Please turn on your sensor and connect in Settings.",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
             }
@@ -170,18 +219,41 @@ fun PreparationScreen(
                     .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(16.dp))
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    StatusRow(
-                        label = "GYROSCOPE",
-                        statusText = if (leanState.isGyroAvailable) "ACTIVE" else "UNAVAILABLE (Fallback)",
-                        isActive = leanState.isGyroAvailable,
-                        warning = !leanState.isGyroAvailable
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    StatusRow(
-                        label = "ACCELEROMETER",
-                        statusText = if (leanState.isAccelAvailable) "ACTIVE" else "UNAVAILABLE",
-                        isActive = leanState.isAccelAvailable
-                    )
+                    if (isBleMode) {
+                        val bleStatus = when (leanState.bleConnectionState) {
+                            com.example.lean.bluetooth.BleConnectionState.CONNECTED -> "CONNECTED (${leanState.bleDeviceName ?: "LEAN_IOT"})"
+                            com.example.lean.bluetooth.BleConnectionState.CONNECTING -> "CONNECTING..."
+                            com.example.lean.bluetooth.BleConnectionState.SCANNING -> "SCANNING..."
+                            com.example.lean.bluetooth.BleConnectionState.DISCONNECTING -> "DISCONNECTING"
+                            com.example.lean.bluetooth.BleConnectionState.DISCONNECTED -> "DISCONNECTED"
+                        }
+                        StatusRow(
+                            label = "ESP32 BLE SENSOR",
+                            statusText = bleStatus,
+                            isActive = leanState.isExternalSensorConnected,
+                            warning = !leanState.isExternalSensorConnected
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        StatusRow(
+                            label = "TELEMETRY STREAM",
+                            statusText = if (leanState.bleLastPacket != null && leanState.isExternalSensorConnected) "ACTIVE (#${leanState.bleLastPacket.sequenceId})" else "WAITING",
+                            isActive = leanState.isExternalSensorConnected && leanState.bleLastPacket != null,
+                            warning = !leanState.isExternalSensorConnected || leanState.bleLastPacket == null
+                        )
+                    } else {
+                        StatusRow(
+                            label = "GYROSCOPE",
+                            statusText = if (leanState.isGyroAvailable) "ACTIVE" else "UNAVAILABLE (Fallback)",
+                            isActive = leanState.isGyroAvailable,
+                            warning = !leanState.isGyroAvailable
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        StatusRow(
+                            label = "ACCELEROMETER",
+                            statusText = if (leanState.isAccelAvailable) "ACTIVE" else "UNAVAILABLE",
+                            isActive = leanState.isAccelAvailable
+                        )
+                    }
                     Spacer(modifier = Modifier.height(12.dp))
                     StatusRow(
                         label = "GPS",
@@ -196,16 +268,18 @@ fun PreparationScreen(
 
             // CENTER & START Button (Requirement 6)
             Button(
-                onClick = onCenterAndStartClick,
+                onClick = { if (canStart) onCenterAndStartClick() },
+                enabled = canStart,
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = if (isDark) MaterialTheme.colorScheme.primaryCyan else MaterialTheme.colorScheme.onBackground
+                    containerColor = if (isDark) MaterialTheme.colorScheme.primaryCyan else MaterialTheme.colorScheme.onBackground,
+                    disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant
                 ),
                 shape = RoundedCornerShape(20.dp),
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(68.dp)
                     .border(
-                        width = if (isDark) 0.dp else 2.dp,
+                        width = if (isDark || !canStart) 0.dp else 2.dp,
                         color = MaterialTheme.colorScheme.onBackground,
                         shape = RoundedCornerShape(20.dp)
                     )
@@ -215,17 +289,17 @@ fun PreparationScreen(
                     horizontalArrangement = Arrangement.Center
                 ) {
                     Icon(
-                        imageVector = Icons.Default.CompassCalibration,
+                        imageVector = if (!canStart) Icons.Default.Warning else Icons.Default.CompassCalibration,
                         contentDescription = "Center and Start",
-                        tint = MaterialTheme.colorScheme.background,
+                        tint = if (canStart) MaterialTheme.colorScheme.background else MaterialTheme.colorScheme.textMuted,
                         modifier = Modifier.size(28.dp)
                     )
                     Spacer(modifier = Modifier.width(12.dp))
                     Text(
-                        text = "CENTER & START",
-                        fontSize = 20.sp,
+                        text = if (!canStart) "CONNECT ESP32 TO START" else "CENTER & START",
+                        fontSize = if (!canStart) 16.sp else 20.sp,
                         fontWeight = FontWeight.Black,
-                        color = MaterialTheme.colorScheme.background,
+                        color = if (canStart) MaterialTheme.colorScheme.background else MaterialTheme.colorScheme.textMuted,
                         letterSpacing = 1.2.sp
                     )
                 }

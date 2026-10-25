@@ -17,10 +17,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BluetoothConnected
+import androidx.compose.material.icons.filled.BluetoothDisabled
 import androidx.compose.material.icons.filled.CompassCalibration
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -55,6 +58,7 @@ import com.example.lean.ui.theme.errorRed
 import com.example.lean.ui.theme.primaryCyan
 import com.example.lean.ui.theme.primaryLime
 import com.example.lean.ui.theme.textMuted
+import com.example.lean.ui.theme.warningAmber
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -216,12 +220,83 @@ fun LiveRideScreen(
                     )
                 }
 
-                IconButton(onClick = onReCenterClick) {
-                    Icon(
-                        imageVector = Icons.Default.CompassCalibration,
-                        contentDescription = "Re-Center Zero",
-                        tint = MaterialTheme.colorScheme.primaryCyan
-                    )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (leanState.isBleSensorActive) {
+                        val isConnected = leanState.isExternalSensorConnected
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isConnected) MaterialTheme.colorScheme.primaryLime.copy(alpha = 0.15f) else MaterialTheme.colorScheme.errorRed.copy(alpha = 0.15f))
+                                .border(
+                                    1.dp,
+                                    if (isConnected) MaterialTheme.colorScheme.primaryLime else MaterialTheme.colorScheme.errorRed,
+                                    RoundedCornerShape(8.dp)
+                                )
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (isConnected) Icons.Default.BluetoothConnected else Icons.Default.BluetoothDisabled,
+                                contentDescription = if (isConnected) "BLE Connected" else "BLE Disconnected",
+                                tint = if (isConnected) MaterialTheme.colorScheme.primaryLime else MaterialTheme.colorScheme.errorRed,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = if (isConnected) "BLE OK" else "BLE LOST",
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isConnected) MaterialTheme.colorScheme.primaryLime else MaterialTheme.colorScheme.errorRed
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                    }
+
+                    IconButton(onClick = onReCenterClick) {
+                        Icon(
+                            imageVector = Icons.Default.CompassCalibration,
+                            contentDescription = "Re-Center Zero",
+                            tint = MaterialTheme.colorScheme.primaryCyan
+                        )
+                    }
+                }
+            }
+
+            if (leanState.isBleSensorActive && !leanState.isExternalSensorConnected) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(1.dp, MaterialTheme.colorScheme.warningAmber, RoundedCornerShape(12.dp))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Warning,
+                            contentDescription = "External Sensor Disconnected",
+                            tint = MaterialTheme.colorScheme.warningAmber,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = "TELEMETRY UNAVAILABLE",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.warningAmber
+                            )
+                            Text(
+                                text = "External sensor disconnected • GPS & ride timer active • Reconnecting...",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
                 }
             }
 
@@ -229,7 +304,7 @@ fun LiveRideScreen(
 
             // Main Current Lean Numeric Display (Theme-Aware)
             LeanAngleDisplay(
-                angleDegrees = leanState.filteredAngleDegrees,
+                angleDegrees = if (leanState.isBleSensorActive && !leanState.isExternalSensorConnected) 0f else leanState.filteredAngleDegrees,
                 directionText = leanState.directionText,
                 displayAngleText = leanState.displayAngleText
             )
@@ -238,7 +313,7 @@ fun LiveRideScreen(
 
             // Visual Horizontal Lean Gauge (Theme-Aware)
             LeanGauge(
-                currentAngleDegrees = leanState.filteredAngleDegrees,
+                currentAngleDegrees = if (leanState.isBleSensorActive && !leanState.isExternalSensorConnected) 0f else leanState.filteredAngleDegrees,
                 maxLeftDegrees = sessionState.maxLeftLean,
                 maxRightDegrees = sessionState.maxRightLean
             )

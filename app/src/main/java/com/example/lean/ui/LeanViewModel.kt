@@ -3,6 +3,9 @@ package com.example.lean.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.lean.bluetooth.BleConnectionState
+import com.example.lean.bluetooth.BlePacket
+import com.example.lean.bluetooth.LeanBleManager
 import com.example.lean.calibration.CalibrationManager
 import com.example.lean.data.AppDatabase
 import com.example.lean.data.AppThemeMode
@@ -48,6 +51,13 @@ class LeanViewModel(application: Application) : AndroidViewModel(application), S
 
     private val database = AppDatabase.getDatabase(application)
     private val rideRepository = RideRepository(database.rideDao(), database.cornerEventDao(), database.fallEventDao())
+    private val bleManager = LeanBleManager(application)
+
+    val bleConnectionState: StateFlow<BleConnectionState> = bleManager.connectionState
+    val latestBlePacket: StateFlow<BlePacket?> = bleManager.latestPacket
+
+    private var esp32ZeroOffsetAngle: Float = 0f
+    private var latestBleAngleRaw: Float = 0f
 
     private val _uiState = MutableStateFlow(LeanState())
     val uiState: StateFlow<LeanState> = _uiState.asStateFlow()
@@ -105,7 +115,54 @@ class LeanViewModel(application: Application) : AndroidViewModel(application), S
             )
         }
 
-        sensorManager.start(loadedSettings.sensorMode)
+        // Observe BLE connection state
+        viewModelScope.launch {
+            bleManager.connectionState.collect { connState ->
+                val isConnected = (connState == BleConnectionState.CONNECTED)
+                _uiState.update { state ->
+                    val feedback = if (state.activeMode == SensorMode.EXTERNAL_BLE && !isConnected) {
+                        when (connState) {
+                            BleConnectionState.SCANNING -> "Scanning for LEAN_IOT..."
+                            BleConnectionState.CONNECTING -> "Connecting to LEAN_IOT..."
+                            BleConnectionState.DISCONNECTED -> "ESP32 disconnected"
+                            else -> state.feedbackMessage
+                        }
+                    } else state.feedbackMessage
+
+                    state.copy(
+                        bleConnectionState = connState,
+                        isExternalSensorConnected = isConnected,
+                        feedbackMessage = feedback
+                    )
+                }
+            }
+        }
+
+        // Observe BLE device metadata
+        viewModelScope.launch {
+            bleManager.connectedDeviceName.collect { name ->
+                _uiState.update { it.copy(bleDeviceName = name) }
+            }
+        }
+        viewModelScope.launch {
+            bleManager.connectedDeviceAddress.collect { address ->
+                _uiState.update { it.copy(bleDeviceAddress = address) }
+            }
+        }
+        viewModelScope.launch {
+            bleManager.lastErrorMessage.collect { errorMsg ->
+                _uiState.update { it.copy(bleErrorMessage = errorMsg) }
+            }
+        }
+
+        // Observe incoming BLE sensor packets
+        viewModelScope.launch {
+            bleManager.packetStream.collect { packet ->
+                onBlePacketReceived(packet)
+            }
+        }
+
+        applySensorMode(loadedSettings.sensorMode)
     }
 
     fun prepareRide() {
@@ -115,20 +172,48 @@ class LeanViewModel(application: Application) : AndroidViewModel(application), S
         rideRecorder.prepareRide()
     }
 
-    fun centerAndStartRide() {
-        // Step 1: Calibration reference capture
-        calibrationManager.calibrate(latestGravity)
+    fun isBleDataFresh(maxAgeMs: Long = 3000L): Boolean {
+        val packet = _uiState.value.bleLastPacket ?: return false
+        val isConnected = _uiState.value.isExternalSensorConnected
+        val age = System.currentTimeMillis() - packet.timestampMs
+        return isConnected && age <= maxAgeMs
+    }
 
-        _uiState.update { state ->
-            state.copy(
-                currentAngleDegrees = 0f,
-                filteredAngleDegrees = 0f,
-                isCalibrated = true,
-                showCenteredFeedback = true,
-                maxLeftDegrees = 0f,
-                maxRightDegrees = 0f,
-                possibleFallDetected = false
-            )
+    fun centerAndStartRide(): Boolean {
+        // Step 1: Calibration reference capture
+        if (_userSettings.value.sensorMode == SensorMode.EXTERNAL_BLE) {
+            if (!_uiState.value.isExternalSensorConnected || !isBleDataFresh()) {
+                _uiState.update {
+                    it.copy(feedbackMessage = "Cannot start ride: ESP32 sensor is not connected or telemetry is stale.")
+                }
+                return false
+            }
+
+            esp32ZeroOffsetAngle = latestBleAngleRaw
+            _uiState.update { state ->
+                state.copy(
+                    currentAngleDegrees = 0f,
+                    filteredAngleDegrees = 0f,
+                    isCalibrated = true,
+                    showCenteredFeedback = true,
+                    maxLeftDegrees = 0f,
+                    maxRightDegrees = 0f,
+                    possibleFallDetected = false
+                )
+            }
+        } else {
+            calibrationManager.calibrate(latestGravity)
+            _uiState.update { state ->
+                state.copy(
+                    currentAngleDegrees = 0f,
+                    filteredAngleDegrees = 0f,
+                    isCalibrated = true,
+                    showCenteredFeedback = true,
+                    maxLeftDegrees = 0f,
+                    maxRightDegrees = 0f,
+                    possibleFallDetected = false
+                )
+            }
         }
 
         fallDetectionStartTimeMs = null
@@ -149,6 +234,7 @@ class LeanViewModel(application: Application) : AndroidViewModel(application), S
             delay(1000)
             _uiState.update { it.copy(showCenteredFeedback = false) }
         }
+        return true
     }
 
     fun endRide(): RideEntity {
@@ -205,15 +291,34 @@ class LeanViewModel(application: Application) : AndroidViewModel(application), S
         _uiState.update { it.copy(possibleFallDetected = false) }
     }
 
-    fun calibrateZero() {
-        calibrationManager.calibrate(latestGravity)
-        _uiState.update { state ->
-            state.copy(
-                currentAngleDegrees = 0f,
-                filteredAngleDegrees = 0f,
-                isCalibrated = true,
-                showCenteredFeedback = true
-            )
+    fun calibrateZero(): Boolean {
+        if (_userSettings.value.sensorMode == SensorMode.EXTERNAL_BLE) {
+            if (!_uiState.value.isExternalSensorConnected || !isBleDataFresh()) {
+                _uiState.update {
+                    it.copy(feedbackMessage = "Cannot re-center: ESP32 sensor is not connected.")
+                }
+                return false
+            }
+
+            esp32ZeroOffsetAngle = latestBleAngleRaw
+            _uiState.update { state ->
+                state.copy(
+                    currentAngleDegrees = 0f,
+                    filteredAngleDegrees = 0f,
+                    isCalibrated = true,
+                    showCenteredFeedback = true
+                )
+            }
+        } else {
+            calibrationManager.calibrate(latestGravity)
+            _uiState.update { state ->
+                state.copy(
+                    currentAngleDegrees = 0f,
+                    filteredAngleDegrees = 0f,
+                    isCalibrated = true,
+                    showCenteredFeedback = true
+                )
+            }
         }
 
         feedbackJob?.cancel()
@@ -221,6 +326,7 @@ class LeanViewModel(application: Application) : AndroidViewModel(application), S
             delay(1000)
             _uiState.update { it.copy(showCenteredFeedback = false) }
         }
+        return true
     }
 
     private fun startSmsCountdown(event: com.example.lean.data.FallEventEntity) {
@@ -282,6 +388,7 @@ class LeanViewModel(application: Application) : AndroidViewModel(application), S
     }
 
     fun resetCalibration() {
+        esp32ZeroOffsetAngle = 0f
         calibrationManager.reset()
         _uiState.update { state ->
             state.copy(
@@ -295,7 +402,7 @@ class LeanViewModel(application: Application) : AndroidViewModel(application), S
     fun resetSettingsToDefault() {
         val defaultSettings = settingsRepository.resetToDefaults()
         _userSettings.value = defaultSettings
-        sensorManager.start(defaultSettings.sensorMode)
+        applySensorMode(defaultSettings.sensorMode)
     }
 
     fun updateThemeMode(themeMode: AppThemeMode) {
@@ -306,7 +413,62 @@ class LeanViewModel(application: Application) : AndroidViewModel(application), S
     fun updateSensorMode(mode: SensorMode) {
         settingsRepository.saveSensorMode(mode)
         _userSettings.update { it.copy(sensorMode = mode) }
-        sensorManager.start(mode)
+        applySensorMode(mode)
+    }
+
+    private fun applySensorMode(mode: SensorMode) {
+        if (mode == SensorMode.EXTERNAL_BLE) {
+            // Mutual exclusion: stop phone sensors completely to avoid concurrent updates
+            sensorManager.stop()
+            _uiState.update { state ->
+                state.copy(
+                    activeMode = SensorMode.EXTERNAL_BLE,
+                    activeSensorName = "ESP32 IoT Sensor (BLE)",
+                    activeSensorLabel = "Wireless BLE",
+                    isBleSensorActive = true
+                )
+            }
+            if (bleManager.hasRequiredPermissions() && bleManager.isBluetoothEnabled()) {
+                bleManager.startScan()
+            } else {
+                val msg = if (!bleManager.isBluetoothEnabled()) "Bluetooth is turned off" else "Bluetooth permission required"
+                _uiState.update { it.copy(feedbackMessage = msg) }
+            }
+        } else {
+            // Mutual exclusion: stop BLE operations completely and restore phone sensor pipeline
+            bleManager.stopScan()
+            bleManager.disconnect()
+            _uiState.update { state ->
+                state.copy(
+                    isBleSensorActive = false
+                )
+            }
+            sensorManager.start(mode)
+        }
+    }
+
+    fun startBleScan() {
+        bleManager.startScan()
+    }
+
+    fun stopBleScan() {
+        bleManager.stopScan()
+    }
+
+    fun connectBleDevice(deviceAddress: String) {
+        bleManager.connect(deviceAddress)
+    }
+
+    fun disconnectBle() {
+        bleManager.disconnect()
+    }
+
+    fun isBluetoothEnabled(): Boolean = bleManager.isBluetoothEnabled()
+
+    fun hasBlePermissions(): Boolean = bleManager.hasRequiredPermissions()
+
+    fun clearBleError() {
+        _uiState.update { it.copy(bleErrorMessage = null) }
     }
 
     fun updateSmoothingLevel(level: SmoothingLevel) {
@@ -405,11 +567,41 @@ class LeanViewModel(application: Application) : AndroidViewModel(application), S
     private var lastDebugLogTimestamp = 0L
     private var previousRawLeanAngle = 0f
 
+    private fun onBlePacketReceived(packet: BlePacket) {
+        if (_userSettings.value.sensorMode != SensorMode.EXTERNAL_BLE) return
+
+        latestBleAngleRaw = packet.leanAngleDegrees
+
+        if (!_uiState.value.isCalibrated) {
+            esp32ZeroOffsetAngle = packet.leanAngleDegrees
+        }
+
+        val calibratedAngle = packet.leanAngleDegrees - esp32ZeroOffsetAngle
+
+        _uiState.update {
+            it.copy(
+                bleLastPacket = packet,
+                rawGyro = Triple(packet.gyroRollRateDps, 0f, 0f)
+            )
+        }
+
+        processLeanAngleSample(
+            rawLeanAngle = calibratedAngle,
+            filteredLeanAngle = calibratedAngle,
+            rawAccel = Triple(0f, 0f, 0f),
+            rawGyro = Triple(packet.gyroRollRateDps, 0f, 0f)
+        )
+    }
+
     override fun onOrientationUpdated(
         gravity: Vector3D,
         rawAccel: Triple<Float, Float, Float>,
         rawGyro: Triple<Float, Float, Float>
     ) {
+        if (_userSettings.value.sensorMode == SensorMode.EXTERNAL_BLE) {
+            return // Guard against concurrent phone sensor updates when BLE mode is active
+        }
+
         latestGravity = gravity
 
         if (!calibrationManager.isCalibrated) {
@@ -431,8 +623,22 @@ class LeanViewModel(application: Application) : AndroidViewModel(application), S
         val currentFiltered = _uiState.value.filteredAngleDegrees
         val newFiltered = alpha * currentFiltered + (1f - alpha) * clampedRawAngle
 
+        processLeanAngleSample(
+            rawLeanAngle = rawLeanAngle,
+            filteredLeanAngle = newFiltered,
+            rawAccel = rawAccel,
+            rawGyro = rawGyro
+        )
+    }
+
+    private fun processLeanAngleSample(
+        rawLeanAngle: Float,
+        filteredLeanAngle: Float,
+        rawAccel: Triple<Float, Float, Float>,
+        rawGyro: Triple<Float, Float, Float>
+    ) {
         val deadZone = _uiState.value.deadZoneThresholdDegrees
-        val displayAngle = if (abs(newFiltered) <= deadZone) 0 else newFiltered.roundToInt()
+        val displayAngle = if (abs(filteredLeanAngle) <= deadZone) 0 else filteredLeanAngle.roundToInt()
 
         // Peak tracking based on filtered whole degrees
         var newMaxLeft = _uiState.value.maxLeftDegrees
@@ -445,15 +651,15 @@ class LeanViewModel(application: Application) : AndroidViewModel(application), S
             newMaxLeft = absDisplay
         }
 
-        // Requirement 14: Throttled Logcat debugging (once per second)
+        // Throttled Logcat debugging (once per second)
         val now = System.currentTimeMillis()
         if (now - lastDebugLogTimestamp >= 1000L) {
             lastDebugLogTimestamp = now
             val accelMag = kotlin.math.sqrt(rawAccel.first * rawAccel.first + rawAccel.second * rawAccel.second + rawAccel.third * rawAccel.third)
             android.util.Log.d(
                 "LeanDebug",
-                "Mode: ${_uiState.value.activeMode.displayName}, RawRoll: %.2f°, CalibratedRoll: %.2f°, FilteredRoll: %.2f°, DisplayAngle: %d°, AccelMag: %.2f m/s²"
-                    .format(java.util.Locale.US, rawLeanAngle, clampedRawAngle, newFiltered, displayAngle, accelMag)
+                "Mode: ${_uiState.value.activeMode.displayName}, RawRoll: %.2f°, FilteredRoll: %.2f°, DisplayAngle: %d°, AccelMag: %.2f m/s²"
+                    .format(java.util.Locale.US, rawLeanAngle, filteredLeanAngle, displayAngle, accelMag)
             )
         }
 
@@ -474,22 +680,22 @@ class LeanViewModel(application: Application) : AndroidViewModel(application), S
             val effectiveSpeedKmh = if (isFresh) loc.currentSpeedKmh else 0f
 
             rideRecorder.onSensorTick(
-                currentLeanDegrees = newFiltered,
+                currentLeanDegrees = filteredLeanAngle,
                 currentSpeedKmh = effectiveSpeedKmh,
                 maxSpeedKmh = loc.maxSpeedKmh,
                 distanceKm = loc.distanceKm
             )
-            
+
             // Fall Detection Logic
             if (_userSettings.value.isFallDetectionEnabled && !_uiState.value.possibleFallDetected) {
                 val criticalThreshold = _userSettings.value.fallDetectionCriticalAngle
-                if (abs(newFiltered) >= criticalThreshold) {
+                if (abs(filteredLeanAngle) >= criticalThreshold) {
                     if (fallDetectionStartTimeMs == null) {
                         fallDetectionStartTimeMs = nowMonoMs
-                        currentFallMaxAngle = abs(newFiltered)
+                        currentFallMaxAngle = abs(filteredLeanAngle)
                     } else {
-                        if (abs(newFiltered) > currentFallMaxAngle) {
-                            currentFallMaxAngle = abs(newFiltered)
+                        if (abs(filteredLeanAngle) > currentFallMaxAngle) {
+                            currentFallMaxAngle = abs(filteredLeanAngle)
                         }
                         if (nowMonoMs - fallDetectionStartTimeMs!! >= 10000L) {
                             // Trigger Fall Detected
@@ -509,7 +715,7 @@ class LeanViewModel(application: Application) : AndroidViewModel(application), S
                             val smsEnabled = _userSettings.value.isEmergencySmsEnabled && _userSettings.value.emergencyPhoneNumber.isNotEmpty()
                             fallDetectionStartTimeMs = null
                             currentFallMaxAngle = 0f
-                            
+
                             viewModelScope.launch {
                                 val event = com.example.lean.data.FallEventEntity(
                                     timestampMs = now,
@@ -541,10 +747,10 @@ class LeanViewModel(application: Application) : AndroidViewModel(application), S
         _uiState.update { state ->
             state.copy(
                 currentAngleDegrees = rawLeanAngle,
-                filteredAngleDegrees = newFiltered,
+                filteredAngleDegrees = filteredLeanAngle,
                 maxLeftDegrees = newMaxLeft,
                 maxRightDegrees = newMaxRight,
-                isCalibrated = calibrationManager.isCalibrated,
+                isCalibrated = if (state.activeMode == SensorMode.EXTERNAL_BLE) true else calibrationManager.isCalibrated,
                 rawAccel = rawAccel,
                 rawGyro = rawGyro,
                 sensorFps = currentFps
@@ -591,7 +797,15 @@ class LeanViewModel(application: Application) : AndroidViewModel(application), S
     }
 
     fun onResume() {
-        sensorManager.start(_userSettings.value.sensorMode)
+        if (_userSettings.value.sensorMode == SensorMode.EXTERNAL_BLE) {
+            if (bleManager.connectionState.value == BleConnectionState.DISCONNECTED &&
+                bleManager.hasRequiredPermissions() && bleManager.isBluetoothEnabled()
+            ) {
+                bleManager.startScan()
+            }
+        } else {
+            sensorManager.start(_userSettings.value.sensorMode)
+        }
         locationManager.checkPermissionAndStatus()
         if (_userSettings.value.isGpsEnabled && activeRideSession.value.rideState == RideState.RECORDING) {
             locationManager.startListening()
@@ -599,7 +813,13 @@ class LeanViewModel(application: Application) : AndroidViewModel(application), S
     }
 
     fun onPause() {
-        sensorManager.stop()
+        if (_userSettings.value.sensorMode == SensorMode.EXTERNAL_BLE) {
+            if (activeRideSession.value.rideState != RideState.RECORDING) {
+                bleManager.stopScan()
+            }
+        } else {
+            sensorManager.stop()
+        }
         if (activeRideSession.value.rideState != RideState.RECORDING) {
             locationManager.stopListening()
         }
@@ -608,6 +828,7 @@ class LeanViewModel(application: Application) : AndroidViewModel(application), S
     override fun onCleared() {
         super.onCleared()
         sensorManager.stop()
+        bleManager.cleanup()
         locationManager.stopListening()
     }
 }

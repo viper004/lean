@@ -6,6 +6,7 @@ import android.content.ContextWrapper
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -30,9 +31,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.BluetoothSearching
+import androidx.compose.material.icons.filled.Bluetooth
+import androidx.compose.material.icons.filled.BluetoothConnected
+import androidx.compose.material.icons.filled.BluetoothDisabled
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -69,6 +75,7 @@ import com.example.lean.data.SmoothingLevel
 import com.example.lean.data.UserSettings
 import com.example.lean.sensor.SensorHardwareType
 import com.example.lean.ui.components.LeanLogo
+import com.example.lean.ui.theme.errorRed
 import com.example.lean.ui.theme.primaryCyan
 import com.example.lean.ui.theme.primaryLime
 import com.example.lean.ui.theme.textMuted
@@ -110,11 +117,62 @@ fun SettingsScreen(
     onResetCalibration: () -> Unit,
     onResetPeak: () -> Unit,
     onResetSettings: (() -> Unit)? = null,
+    onStartBleScan: () -> Unit = {},
+    onStopBleScan: () -> Unit = {},
+    onDisconnectBle: () -> Unit = {},
     onBackClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     var showDiagnostics by remember { mutableStateOf(false) }
+
+    val blePermissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        arrayOf(
+            Manifest.permission.BLUETOOTH_SCAN,
+            Manifest.permission.BLUETOOTH_CONNECT
+        )
+    } else {
+        arrayOf(
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        )
+    }
+
+    val blePermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val allGranted = permissions.values.all { it }
+        if (allGranted) {
+            val btManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as? android.bluetooth.BluetoothManager
+            val btAdapter = btManager?.adapter
+            if (btAdapter == null || !btAdapter.isEnabled) {
+                Toast.makeText(context, "Bluetooth is disabled. Please turn on Bluetooth.", Toast.LENGTH_LONG).show()
+            } else {
+                onSensorModeChange(SensorMode.EXTERNAL_BLE)
+                onStartBleScan()
+            }
+        } else {
+            Toast.makeText(context, "Bluetooth permissions are required to scan for LEAN_IOT.", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    fun requestBleScanOrPermissions() {
+        val allGranted = blePermissions.all { perm ->
+            ContextCompat.checkSelfPermission(context, perm) == PackageManager.PERMISSION_GRANTED
+        }
+        if (!allGranted) {
+            blePermissionLauncher.launch(blePermissions)
+        } else {
+            val btManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as? android.bluetooth.BluetoothManager
+            val btAdapter = btManager?.adapter
+            if (btAdapter == null || !btAdapter.isEnabled) {
+                Toast.makeText(context, "Bluetooth is disabled. Please turn on Bluetooth in settings.", Toast.LENGTH_LONG).show()
+            } else {
+                onSensorModeChange(SensorMode.EXTERNAL_BLE)
+                onStartBleScan()
+            }
+        }
+    }
 
     var pendingSmsAction by remember { mutableStateOf<PendingSmsAction?>(null) }
     var showPermanentDenialDialog by remember { mutableStateOf(false) }
@@ -309,6 +367,7 @@ fun SettingsScreen(
                             SensorMode.ROTATION_VECTOR -> leanState?.hasRotationVector ?: true
                             SensorMode.FUSED_GYRO_ACCEL -> (leanState?.isGyroAvailable ?: true) && (leanState?.isAccelAvailable ?: true)
                             SensorMode.ACCEL_ONLY -> leanState?.isAccelAvailable ?: true
+                            SensorMode.EXTERNAL_BLE -> true
                         }
 
                         val isSelected = settings.sensorMode == mode
@@ -350,6 +409,20 @@ fun SettingsScreen(
                                         fontWeight = FontWeight.Bold,
                                         color = MaterialTheme.colorScheme.warningAmber
                                     )
+                                } else if (mode == SensorMode.EXTERNAL_BLE) {
+                                    val isConnected = leanState?.isExternalSensorConnected == true
+                                    val connState = leanState?.bleConnectionState ?: com.example.lean.bluetooth.BleConnectionState.DISCONNECTED
+                                    val statusText = if (isConnected) {
+                                        "Connected: ${leanState?.bleDeviceName ?: "LEAN_IOT"}"
+                                    } else {
+                                        "ESP32 IoT BLE Telemetry (${connState.name})"
+                                    }
+                                    Text(
+                                        text = statusText,
+                                        fontSize = 12.sp,
+                                        fontWeight = if (isConnected) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (isConnected) MaterialTheme.colorScheme.primaryLime else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
                                 } else {
                                     Text(
                                         text = if (isAvailable) mode.description else "Unavailable on device hardware",
@@ -357,6 +430,278 @@ fun SettingsScreen(
                                         color = if (isAvailable) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
                                     )
                                 }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            // Section 2B: ESP32 IoT Sensor (LEAN_IOT) Section
+            SettingsSectionHeader("ESP32 IoT WIRELESS SENSOR (BLE)")
+
+            val bleConnState = leanState?.bleConnectionState ?: com.example.lean.bluetooth.BleConnectionState.DISCONNECTED
+            val isBleConnected = leanState?.isExternalSensorConnected == true
+            val isBleScanning = bleConnState == com.example.lean.bluetooth.BleConnectionState.SCANNING
+            val isBleConnecting = bleConnState == com.example.lean.bluetooth.BleConnectionState.CONNECTING
+            val blePacket = leanState?.bleLastPacket
+
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(16.dp))
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    // Header Row with Icon & Title
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = when {
+                                isBleConnected -> Icons.Default.BluetoothConnected
+                                isBleScanning -> Icons.AutoMirrored.Filled.BluetoothSearching
+                                else -> Icons.Default.Bluetooth
+                            },
+                            contentDescription = "Bluetooth Status",
+                            tint = when {
+                                isBleConnected -> MaterialTheme.colorScheme.primaryLime
+                                isBleScanning || isBleConnecting -> MaterialTheme.colorScheme.primaryCyan
+                                else -> MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            modifier = Modifier.size(28.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "LEAN_IOT Sensor",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "ESP32 MPU6050 BLE Peripheral (35ms)",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        // Status Badge
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(
+                                    when {
+                                        isBleConnected -> MaterialTheme.colorScheme.primaryLime.copy(alpha = 0.15f)
+                                        isBleScanning || isBleConnecting -> MaterialTheme.colorScheme.primaryCyan.copy(alpha = 0.15f)
+                                        leanState?.bleErrorMessage != null -> MaterialTheme.colorScheme.errorRed.copy(alpha = 0.15f)
+                                        else -> MaterialTheme.colorScheme.surfaceVariant
+                                    }
+                                )
+                                .padding(horizontal = 10.dp, vertical = 5.dp)
+                        ) {
+                            Text(
+                                text = when (bleConnState) {
+                                    com.example.lean.bluetooth.BleConnectionState.CONNECTED -> "CONNECTED"
+                                    com.example.lean.bluetooth.BleConnectionState.SCANNING -> "SCANNING"
+                                    com.example.lean.bluetooth.BleConnectionState.CONNECTING -> "CONNECTING"
+                                    com.example.lean.bluetooth.BleConnectionState.DISCONNECTING -> "DISCONNECTING"
+                                    com.example.lean.bluetooth.BleConnectionState.DISCONNECTED -> {
+                                        if (leanState?.bleErrorMessage != null) "ERROR" else "DISCONNECTED"
+                                    }
+                                },
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                color = when {
+                                    isBleConnected -> MaterialTheme.colorScheme.primaryLime
+                                    isBleScanning || isBleConnecting -> MaterialTheme.colorScheme.primaryCyan
+                                    leanState?.bleErrorMessage != null -> MaterialTheme.colorScheme.errorRed
+                                    else -> MaterialTheme.colorScheme.textMuted
+                                }
+                            )
+                        }
+                    }
+
+                    // Device Details Row (if connected)
+                    if (isBleConnected && leanState?.bleDeviceAddress != null) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "DEVICE MAC",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.textMuted
+                            )
+                            Text(
+                                text = leanState.bleDeviceAddress,
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    // Live Telemetry Preview (when connected and packets arriving)
+                    if (isBleConnected && blePacket != null) {
+                        Spacer(modifier = Modifier.height(14.dp))
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column {
+                                    Text("LIVE ANGLE", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.textMuted)
+                                    Text(
+                                        text = String.format(Locale.US, "%.1f°", blePacket.leanAngleDegrees),
+                                        fontSize = 18.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primaryCyan
+                                    )
+                                }
+                                Column {
+                                    Text("ROLL RATE", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.textMuted)
+                                    Text(
+                                        text = String.format(Locale.US, "%.1f °/s", blePacket.gyroRollRateDps),
+                                        fontSize = 18.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primaryLime
+                                    )
+                                }
+                                Column {
+                                    Text("PACKET SEQ", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.textMuted)
+                                    Text(
+                                        text = "#${blePacket.sequenceId}",
+                                        fontSize = 18.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // Error Message Display (if any)
+                    if (leanState?.bleErrorMessage != null) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(MaterialTheme.colorScheme.errorRed.copy(alpha = 0.1f))
+                                .border(1.dp, MaterialTheme.colorScheme.errorRed.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
+                                .padding(10.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Warning,
+                                contentDescription = "Error",
+                                tint = MaterialTheme.colorScheme.errorRed,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = leanState.bleErrorMessage,
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.errorRed
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Action Buttons (Scan / Stop / Disconnect)
+                    when {
+                        isBleConnected -> {
+                            Button(
+                                onClick = onDisconnectBle,
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorRed),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(48.dp)
+                            ) {
+                                Text(
+                                    text = "DISCONNECT SENSOR",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                            }
+                        }
+                        isBleScanning -> {
+                            Button(
+                                onClick = onStopBleScan,
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.warningAmber),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(48.dp)
+                            ) {
+                                Text(
+                                    text = "STOP SCANNING",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.background
+                                )
+                            }
+                        }
+                        isBleConnecting -> {
+                            Button(
+                                onClick = onDisconnectBle,
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(48.dp)
+                            ) {
+                                Text(
+                                    text = "CANCEL CONNECTION",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+                        else -> {
+                            Button(
+                                onClick = { requestBleScanOrPermissions() },
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primaryCyan),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(48.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Bluetooth,
+                                    contentDescription = "Scan",
+                                    tint = MaterialTheme.colorScheme.background,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "SCAN & CONNECT TO LEAN_IOT",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.background
+                                )
                             }
                         }
                     }

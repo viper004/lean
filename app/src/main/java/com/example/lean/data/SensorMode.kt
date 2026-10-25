@@ -20,6 +20,10 @@ enum class SensorMode(val displayName: String, val description: String) {
     ACCEL_ONLY(
         displayName = "Accelerometer Only",
         description = "Fallback mode based on gravity tilt measurement."
+    ),
+    EXTERNAL_BLE(
+        displayName = "ESP32 IoT Sensor (BLE)",
+        description = "External wireless MPU6050 sensor mounted on motorcycle."
     )
 }
 
