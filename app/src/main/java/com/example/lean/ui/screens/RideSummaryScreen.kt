@@ -124,11 +124,20 @@ fun RideSummaryScreen(
                             color = MaterialTheme.colorScheme.primaryLime,
                             letterSpacing = 1.5.sp
                         )
-                        Text(
-                            text = dateHeaderFormat.format(Date(ride.startTimeMs)),
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = dateHeaderFormat.format(Date(ride.startTimeMs)),
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "• ${ride.ridingProfile}",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primaryCyan
+                            )
+                        }
                     }
                 }
 

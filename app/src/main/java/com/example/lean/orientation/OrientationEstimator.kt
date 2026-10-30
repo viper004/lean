@@ -1,6 +1,7 @@
 package com.example.lean.orientation
 
 import android.hardware.SensorManager
+import com.example.lean.data.RidingProfile
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
@@ -11,6 +12,8 @@ import kotlin.math.sin
  * 1. GAME_ROTATION_VECTOR / ROTATION_VECTOR (Android OS Fused 3D Matrix)
  * 2. FUSED_GYRO_ACCEL (Complementary Filter with dynamic accelerometer weighting)
  * 3. ACCEL_ONLY (Low-pass filtered gravity tilt)
+ *
+ * Supports dynamic SPORTS and CASUAL profile tuning without resetting tracked orientation.
  */
 class OrientationEstimator {
 
@@ -18,8 +21,15 @@ class OrientationEstimator {
     private var isInitialized = false
     private var isRotationVectorActive = false
     private var lastGyroTimestamp: Long = 0L
+    private var currentProfile: RidingProfile = RidingProfile.SPORTS
 
-    fun processAccelerometer(x: Float, y: Float, z: Float, alpha: Float = 0.15f) {
+    fun setProfile(profile: RidingProfile) {
+        this.currentProfile = profile
+    }
+
+    fun getProfile(): RidingProfile = currentProfile
+
+    fun processAccelerometer(x: Float, y: Float, z: Float) {
         if (isRotationVectorActive) return // Primary rotation vector sensor is active
 
         val rawAcc = Vector3D(x, y, z)
@@ -31,16 +41,22 @@ class OrientationEstimator {
             return
         }
 
+        // Mode-dependent base alpha:
+        // Sports: 0.25 (responsive tilt tracking, faster transient adaptation)
+        // Casual: 0.08 (strong smoothing of engine and road vibration)
+        val baseAlpha = if (currentProfile == RidingProfile.SPORTS) 0.25f else 0.08f
+
         // Calculate deviation from 1G (9.81 m/s²)
         val dev = abs(accelMag - 9.81f)
 
         // Dynamic alpha: when total acceleration is close to 1G, trust accelerometer gravity direction.
         // During dynamic acceleration, braking, or sustained cornering centrifugal force, lower accelerometer weight
         // to prevent dynamic acceleration from pulling the lean angle toward 0°.
+        val minAlpha = if (currentProfile == RidingProfile.SPORTS) 0.015f else 0.005f
         val dynamicAlpha = when {
-            dev <= 1.0f -> alpha
-            dev <= 2.5f -> (alpha * (1.0f - (dev - 1.0f) / 1.5f)).coerceIn(0.005f, alpha)
-            else -> 0.005f
+            dev <= 1.0f -> baseAlpha
+            dev <= 2.5f -> (baseAlpha * (1.0f - (dev - 1.0f) / 1.5f)).coerceIn(minAlpha, baseAlpha)
+            else -> minAlpha
         }
 
         gravityVector = Vector3D(
@@ -93,8 +109,21 @@ class OrientationEstimator {
         val gx = rotationMatrix[6] * 9.81f
         val gy = rotationMatrix[7] * 9.81f
         val gz = rotationMatrix[8] * 9.81f
+        val target = Vector3D(gx, gy, gz)
 
-        gravityVector = Vector3D(gx, gy, gz)
+        if (!isInitialized || currentProfile == RidingProfile.SPORTS) {
+            // Sports: direct, lowest practical latency
+            gravityVector = target
+        } else {
+            // Casual: gentle smoothing on rotation vector to eliminate minor road-surface jitter
+            val smoothAlpha = 0.20f
+            gravityVector = Vector3D(
+                gravityVector.x + smoothAlpha * (target.x - gravityVector.x),
+                gravityVector.y + smoothAlpha * (target.y - gravityVector.y),
+                gravityVector.z + smoothAlpha * (target.z - gravityVector.z)
+            )
+        }
+
         isInitialized = true
         isRotationVectorActive = true
     }

@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -71,6 +73,7 @@ fun LiveRideScreen(
     onReCenterClick: () -> Unit,
     onEndRideConfirmed: () -> Unit,
     onDismissFallDetection: () -> Unit,
+    onProfileToggle: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var showEndRideDialog by remember { mutableStateOf(false) }
@@ -252,6 +255,36 @@ fun LiveRideScreen(
                         }
                         Spacer(modifier = Modifier.width(8.dp))
                     }
+
+                    // Operating Profile Pill (Sports / Casual toggle)
+                    val isProfileSynced = !leanState.isBleSensorActive || leanState.isProfileSynchronizedWithEsp32
+                    val profileIndicatorColor = if (isProfileSynced) MaterialTheme.colorScheme.primaryLime else MaterialTheme.colorScheme.warningAmber
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(MaterialTheme.colorScheme.primaryCyan.copy(alpha = 0.12f))
+                            .border(1.dp, MaterialTheme.colorScheme.primaryCyan, RoundedCornerShape(8.dp))
+                            .clickable { onProfileToggle() }
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(profileIndicatorColor)
+                        )
+                        Spacer(modifier = Modifier.width(5.dp))
+                        Text(
+                            text = leanState.ridingProfile.displayName,
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primaryCyan
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(4.dp))
 
                     IconButton(onClick = onReCenterClick) {
                         Icon(

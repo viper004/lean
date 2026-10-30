@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -22,7 +23,9 @@ import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.BluetoothConnected
 import androidx.compose.material.icons.filled.BluetoothDisabled
 import androidx.compose.material.icons.filled.CompassCalibration
+import androidx.compose.material.icons.filled.DirectionsBike
 import androidx.compose.material.icons.filled.PhonelinkSetup
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -43,6 +46,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.lean.data.LeanState
+import com.example.lean.data.RidingProfile
 import com.example.lean.location.LocationData
 import com.example.lean.ui.theme.isDark
 import com.example.lean.ui.theme.primaryCyan
@@ -57,6 +61,7 @@ fun PreparationScreen(
     isGpsSettingEnabled: Boolean,
     onCenterAndStartClick: () -> Unit,
     onBackClick: () -> Unit,
+    onProfileSelected: (RidingProfile) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val isDark = MaterialTheme.colorScheme.isDark
@@ -276,6 +281,83 @@ fun PreparationScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
 
+            // RIDING PROFILE SELECTION (Sports vs Casual)
+            Text(
+                text = "RIDING PROFILE",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.textMuted,
+                letterSpacing = 1.5.sp,
+                modifier = Modifier.align(Alignment.Start).padding(start = 4.dp, bottom = 8.dp)
+            )
+
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(16.dp))
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        ProfileSelectButton(
+                            profile = RidingProfile.SPORTS,
+                            selected = leanState.ridingProfile == RidingProfile.SPORTS,
+                            icon = Icons.Default.Speed,
+                            title = "SPORTS",
+                            subtitle = "Track / Low Latency",
+                            modifier = Modifier.weight(1f),
+                            onClick = { onProfileSelected(RidingProfile.SPORTS) }
+                        )
+
+                        ProfileSelectButton(
+                            profile = RidingProfile.CASUAL,
+                            selected = leanState.ridingProfile == RidingProfile.CASUAL,
+                            icon = Icons.Default.DirectionsBike,
+                            title = "CASUAL",
+                            subtitle = "Daily / Smooth",
+                            modifier = Modifier.weight(1f),
+                            onClick = { onProfileSelected(RidingProfile.CASUAL) }
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Live synchronization state indicator
+                    val (statusText, statusColor) = when {
+                        !isBleMode -> Pair("Active on Phone Sensors", MaterialTheme.colorScheme.primaryCyan)
+                        !leanState.isExternalSensorConnected -> Pair("Active on Phone (ESP32 Disconnected)", MaterialTheme.colorScheme.textMuted)
+                        leanState.isProfileSynchronizing || leanState.esp32RidingProfile != leanState.ridingProfile ->
+                            Pair("Syncing profile with ESP32...", MaterialTheme.colorScheme.warningAmber)
+                        else -> Pair("ESP32 Synchronized (${leanState.esp32RidingProfile?.displayName})", MaterialTheme.colorScheme.primaryLime)
+                    }
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(statusColor)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = statusText,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = statusColor
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
             // System Status
             Text(
                 text = "SYSTEM STATUS",
@@ -394,6 +476,53 @@ fun PreparationScreen(
             }
 
             Spacer(modifier = Modifier.height(16.dp))
+        }
+    }
+}
+
+@Composable
+private fun ProfileSelectButton(
+    profile: RidingProfile,
+    selected: Boolean,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    val borderColor = if (selected) MaterialTheme.colorScheme.primaryCyan else MaterialTheme.colorScheme.outline
+    val containerColor = if (selected) MaterialTheme.colorScheme.primaryCyan.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surface
+
+    Card(
+        onClick = onClick,
+        colors = CardDefaults.cardColors(containerColor = containerColor),
+        shape = RoundedCornerShape(12.dp),
+        modifier = modifier.border(if (selected) 2.dp else 1.dp, borderColor, RoundedCornerShape(12.dp))
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = title,
+                tint = if (selected) MaterialTheme.colorScheme.primaryCyan else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(24.dp)
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = title,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (selected) MaterialTheme.colorScheme.primaryCyan else MaterialTheme.colorScheme.onSurface
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = subtitle,
+                fontSize = 10.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center
+            )
         }
     }
 }

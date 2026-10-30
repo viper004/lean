@@ -24,6 +24,7 @@ import android.os.Looper
 import android.os.ParcelUuid
 import android.util.Log
 import androidx.core.content.ContextCompat
+import com.example.lean.data.RidingProfile
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -84,6 +85,8 @@ class LeanBleManager(private val context: Context) {
         val CHARACTERISTIC_UUID: UUID = UUID.fromString("7b8e0002-7a4d-4f2b-9c3a-6d1e5f000001")
         val CALIBRATION_COMMAND_UUID: UUID = UUID.fromString("7b8e0003-7a4d-4f2b-9c3a-6d1e5f000001")
         val CALIBRATION_STATUS_UUID: UUID = UUID.fromString("7b8e0004-7a4d-4f2b-9c3a-6d1e5f000001")
+        val MODE_COMMAND_UUID: UUID = UUID.fromString("7b8e0005-7a4d-4f2b-9c3a-6d1e5f000001")
+        val MODE_STATUS_UUID: UUID = UUID.fromString("7b8e0006-7a4d-4f2b-9c3a-6d1e5f000001")
         val CCCD_UUID: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
 
         private const val DEFAULT_SCAN_TIMEOUT_MS = 15000L
@@ -101,6 +104,9 @@ class LeanBleManager(private val context: Context) {
     private var telemetryCharacteristic: BluetoothGattCharacteristic? = null
     private var calibrationCommandCharacteristic: BluetoothGattCharacteristic? = null
     private var calibrationStatusCharacteristic: BluetoothGattCharacteristic? = null
+    private var modeCommandCharacteristic: BluetoothGattCharacteristic? = null
+    private var modeStatusCharacteristic: BluetoothGattCharacteristic? = null
+    private var pendingDesiredProfile: RidingProfile? = null
 
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -110,6 +116,12 @@ class LeanBleManager(private val context: Context) {
 
     private val _calibrationStatus = MutableStateFlow(BleCalibrationStatus.IDLE)
     val calibrationStatus: StateFlow<BleCalibrationStatus> = _calibrationStatus.asStateFlow()
+
+    private val _esp32RidingProfile = MutableStateFlow<RidingProfile?>(null)
+    val esp32RidingProfile: StateFlow<RidingProfile?> = _esp32RidingProfile.asStateFlow()
+
+    private val _isProfileSynchronizing = MutableStateFlow(false)
+    val isProfileSynchronizing: StateFlow<Boolean> = _isProfileSynchronizing.asStateFlow()
 
     private val _latestPacket = MutableStateFlow<BlePacket?>(null)
     val latestPacket: StateFlow<BlePacket?> = _latestPacket.asStateFlow()
@@ -425,9 +437,60 @@ class LeanBleManager(private val context: Context) {
         telemetryCharacteristic = null
         calibrationCommandCharacteristic = null
         calibrationStatusCharacteristic = null
+        modeCommandCharacteristic = null
+        modeStatusCharacteristic = null
         _connectedDeviceAddress.value = null
         _connectedDeviceName.value = null
+        _esp32RidingProfile.value = null
+        _isProfileSynchronizing.value = false
         cancelCalibrationTimeout()
+    }
+
+    /**
+     * Sends a command to ESP32 to switch sensor operating mode to [profile].
+     * Marks profile as synchronizing until confirmed by ESP32 mode status notification.
+     */
+    @SuppressLint("MissingPermission")
+    fun setRidingProfile(profile: RidingProfile): Boolean {
+        pendingDesiredProfile = profile
+        val gatt = bluetoothGatt
+        val cmdChar = modeCommandCharacteristic
+        if (gatt == null || cmdChar == null || _connectionState.value != BleConnectionState.CONNECTED) {
+            Log.d(TAG, "Cannot send mode to ESP32: not connected (queued for connection)")
+            return false
+        }
+
+        _isProfileSynchronizing.value = true
+        val cmdBytes = byteArrayOf(profile.id)
+        val success = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            gatt.writeCharacteristic(
+                cmdChar,
+                cmdBytes,
+                BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+            ) == BluetoothStatusCodes.SUCCESS
+        } else {
+            @Suppress("DEPRECATION")
+            cmdChar.value = cmdBytes
+            @Suppress("DEPRECATION")
+            cmdChar.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+            @Suppress("DEPRECATION")
+            gatt.writeCharacteristic(cmdChar)
+        }
+
+        if (!success) {
+            Log.e(TAG, "Failed to initiate mode write to ESP32 characteristic")
+            _isProfileSynchronizing.value = false
+        } else {
+            Log.d(TAG, "Dispatched mode command to ESP32: ${profile.displayName} (0x%02X)".format(profile.id))
+        }
+        return success
+    }
+
+    fun setDesiredRidingProfile(profile: RidingProfile) {
+        pendingDesiredProfile = profile
+        if (_connectionState.value == BleConnectionState.CONNECTED) {
+            setRidingProfile(profile)
+        }
     }
 
     private fun processIncomingBytes(bytes: ByteArray) {
@@ -448,6 +511,21 @@ class LeanBleManager(private val context: Context) {
                 cancelCalibrationTimeout()
             }
             _calibrationStatus.value = status
+        }
+    }
+
+    private fun processIncomingModeStatus(bytes: ByteArray) {
+        if (bytes.isNotEmpty()) {
+            val confirmed = RidingProfile.fromId(bytes[0])
+            Log.d(TAG, "Received ESP32 confirmed operating mode: ${confirmed.displayName} (0x%02X)".format(bytes[0]))
+            _esp32RidingProfile.value = confirmed
+            _isProfileSynchronizing.value = false
+
+            val desired = pendingDesiredProfile
+            if (desired != null && desired != confirmed) {
+                Log.d(TAG, "ESP32 mode (${confirmed.displayName}) differs from desired (${desired.displayName}), updating...")
+                setRidingProfile(desired)
+            }
         }
     }
 
@@ -567,6 +645,8 @@ class LeanBleManager(private val context: Context) {
             telemetryCharacteristic = service.getCharacteristic(CHARACTERISTIC_UUID)
             calibrationCommandCharacteristic = service.getCharacteristic(CALIBRATION_COMMAND_UUID)
             calibrationStatusCharacteristic = service.getCharacteristic(CALIBRATION_STATUS_UUID)
+            modeCommandCharacteristic = service.getCharacteristic(MODE_COMMAND_UUID)
+            modeStatusCharacteristic = service.getCharacteristic(MODE_STATUS_UUID)
 
             val telemetryChar = telemetryCharacteristic
             if (telemetryChar == null) {
@@ -654,13 +734,38 @@ class LeanBleManager(private val context: Context) {
                         }
                     }
 
-                    // If status char subscription is not needed or absent, finish setup
-                    finishConnectionSetup(gatt)
+                    // If status char subscription is not needed or absent, continue to mode status
+                    subscribeToModeStatus(gatt)
                 } else if (charUuid == CALIBRATION_STATUS_UUID) {
-                    Log.d(TAG, "Calibration status CCCD write success. Connection fully established!")
+                    Log.d(TAG, "Calibration status CCCD write success. Subscribing to mode status...")
+                    subscribeToModeStatus(gatt)
+                } else if (charUuid == MODE_STATUS_UUID) {
+                    Log.d(TAG, "Mode status CCCD write success. Connection fully established!")
                     finishConnectionSetup(gatt)
                 }
             }
+        }
+
+        @SuppressLint("MissingPermission")
+        private fun subscribeToModeStatus(gatt: BluetoothGatt) {
+            val modeChar = modeStatusCharacteristic
+            if (modeChar != null) {
+                try {
+                    gatt.setCharacteristicNotification(modeChar, true)
+                    val modeCccd = modeChar.getDescriptor(CCCD_UUID)
+                    if (modeCccd != null) {
+                        val writeNext = writeDescriptorCompat(
+                            gatt, modeCccd, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                        )
+                        if (writeNext) {
+                            return
+                        }
+                    }
+                } catch (e: SecurityException) {
+                    Log.w(TAG, "SecurityException subscribing to mode status", e)
+                }
+            }
+            finishConnectionSetup(gatt)
         }
 
         @SuppressLint("MissingPermission")
@@ -673,6 +778,17 @@ class LeanBleManager(private val context: Context) {
                 gatt.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH)
             } catch (e: SecurityException) {
                 Log.w(TAG, "Permission denied for requestConnectionPriority: ${e.message}")
+            }
+
+            // Read current operating mode from ESP32
+            val modeChar = modeStatusCharacteristic
+            if (modeChar != null) {
+                try {
+                    gatt.readCharacteristic(modeChar)
+                    Log.d(TAG, "Initiated read for initial ESP32 operating mode")
+                } catch (e: SecurityException) {
+                    Log.w(TAG, "SecurityException reading mode characteristic: ${e.message}")
+                }
             }
         }
 
@@ -690,10 +806,44 @@ class LeanBleManager(private val context: Context) {
                     _calibrationStatus.value = BleCalibrationStatus.FAILED
                     _lastErrorMessage.value = "Failed to send calibration command (status $status)"
                 }
+            } else if (characteristic.uuid == MODE_COMMAND_UUID) {
+                if (status == BluetoothGatt.GATT_SUCCESS) {
+                    Log.d(TAG, "Mode command successfully written to ESP32 characteristic")
+                } else {
+                    Log.e(TAG, "Failed to write mode command to ESP32: status $status")
+                    _isProfileSynchronizing.value = false
+                }
             }
         }
 
-        // Android 13+ (API 33+) callback
+        // Android 13+ (API 33+) read callback
+        override fun onCharacteristicRead(
+            gatt: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic,
+            value: ByteArray,
+            status: Int
+        ) {
+            if (status == BluetoothGatt.GATT_SUCCESS && characteristic.uuid == MODE_STATUS_UUID) {
+                processIncomingModeStatus(value)
+            }
+        }
+
+        // Android <= 12 (API < 33) legacy read callback
+        @Suppress("DEPRECATION")
+        override fun onCharacteristicRead(
+            gatt: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic,
+            status: Int
+        ) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU && status == BluetoothGatt.GATT_SUCCESS) {
+                if (characteristic.uuid == MODE_STATUS_UUID) {
+                    val bytes = characteristic.value ?: byteArrayOf()
+                    processIncomingModeStatus(bytes)
+                }
+            }
+        }
+
+        // Android 13+ (API 33+) notification callback
         override fun onCharacteristicChanged(
             gatt: BluetoothGatt,
             characteristic: BluetoothGattCharacteristic,
@@ -702,10 +852,11 @@ class LeanBleManager(private val context: Context) {
             when (characteristic.uuid) {
                 CHARACTERISTIC_UUID -> processIncomingBytes(value)
                 CALIBRATION_STATUS_UUID -> processIncomingCalibrationStatus(value)
+                MODE_STATUS_UUID -> processIncomingModeStatus(value)
             }
         }
 
-        // Android <= 12 (API < 33) legacy callback
+        // Android <= 12 (API < 33) legacy notification callback
         @Suppress("DEPRECATION")
         override fun onCharacteristicChanged(
             gatt: BluetoothGatt,
@@ -716,6 +867,7 @@ class LeanBleManager(private val context: Context) {
                 when (characteristic.uuid) {
                     CHARACTERISTIC_UUID -> processIncomingBytes(bytes)
                     CALIBRATION_STATUS_UUID -> processIncomingCalibrationStatus(bytes)
+                    MODE_STATUS_UUID -> processIncomingModeStatus(bytes)
                 }
             }
         }

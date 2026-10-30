@@ -149,7 +149,8 @@ class RideStatisticsCalculator(
             safetyWarningPercentage = warnPct,
             safetyCriticalPercentage = critPct,
             warningTimeMs = warningTimeMs,
-            criticalTimeMs = criticalTimeMs
+            criticalTimeMs = criticalTimeMs,
+            ridingProfile = settings.ridingProfile.name
         )
     }
 }

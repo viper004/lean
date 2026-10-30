@@ -14,6 +14,7 @@ enum class SmoothingLevel(val displayName: String, val alpha: Float) {
 data class UserSettings(
     val themeMode: AppThemeMode = AppThemeMode.DARK,
     val sensorMode: SensorMode = SensorMode.AUTOMATIC,
+    val ridingProfile: RidingProfile = RidingProfile.SPORTS,
     val smoothingLevel: SmoothingLevel = SmoothingLevel.MEDIUM,
     val keepScreenAwake: Boolean = true,
     val lockOrientation: Boolean = false,

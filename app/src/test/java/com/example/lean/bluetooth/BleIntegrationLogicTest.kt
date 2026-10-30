@@ -185,4 +185,45 @@ class BleIntegrationLogicTest {
         assertTrue("Packet within 3000ms must be fresh", isFresh)
         assertFalse("Packet older than 3000ms must be stale", isStale)
     }
+
+    @Test
+    fun testRidingProfileEnumValuesAndBytes() {
+        val sports = com.example.lean.data.RidingProfile.SPORTS
+        val casual = com.example.lean.data.RidingProfile.CASUAL
+
+        assertEquals(0x01.toByte(), sports.id)
+        assertEquals(0x02.toByte(), casual.id)
+
+        assertEquals(sports, com.example.lean.data.RidingProfile.fromId(0x01))
+        assertEquals(casual, com.example.lean.data.RidingProfile.fromId(0x02))
+        // Default fallback is SPORTS
+        assertEquals(com.example.lean.data.RidingProfile.SPORTS, com.example.lean.data.RidingProfile.fromId(0x99.toByte()))
+    }
+
+    @Test
+    fun testRidingProfileUuidConstants() {
+        assertEquals("7b8e0005-7a4d-4f2b-9c3a-6d1e5f000001", LeanBleManager.MODE_COMMAND_UUID.toString())
+        assertEquals("7b8e0006-7a4d-4f2b-9c3a-6d1e5f000001", LeanBleManager.MODE_STATUS_UUID.toString())
+    }
+
+    @Test
+    fun testLeanStateProfileSynchronizationProperties() {
+        val syncedState = com.example.lean.data.LeanState(
+            isBleSensorActive = true,
+            isExternalSensorConnected = true,
+            ridingProfile = com.example.lean.data.RidingProfile.SPORTS,
+            esp32RidingProfile = com.example.lean.data.RidingProfile.SPORTS,
+            isProfileSynchronizing = false
+        )
+        assertTrue(syncedState.isProfileSynchronizedWithEsp32)
+
+        val unsyncedState = com.example.lean.data.LeanState(
+            isBleSensorActive = true,
+            isExternalSensorConnected = true,
+            ridingProfile = com.example.lean.data.RidingProfile.CASUAL,
+            esp32RidingProfile = com.example.lean.data.RidingProfile.SPORTS,
+            isProfileSynchronizing = true
+        )
+        assertFalse(unsyncedState.isProfileSynchronizedWithEsp32)
+    }
 }

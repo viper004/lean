@@ -7,6 +7,7 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.os.Build
 import android.util.Log
+import com.example.lean.data.RidingProfile
 import com.example.lean.data.SensorMode
 import com.example.lean.orientation.OrientationEstimator
 import com.example.lean.orientation.Vector3D
@@ -32,6 +33,7 @@ class LeanSensorManager(context: Context) : SensorEventListener {
     private val orientationEstimator = OrientationEstimator()
     private var requestedMode: SensorMode = SensorMode.AUTOMATIC
     private var activeMode: SensorMode = SensorMode.AUTOMATIC
+    private var currentProfile: RidingProfile = RidingProfile.SPORTS
     private var isListening = false
 
     private var listener: SensorDataListener? = null
@@ -250,42 +252,64 @@ class LeanSensorManager(context: Context) : SensorEventListener {
         }
     }
 
-    fun start(mode: SensorMode) {
+    fun setProfile(profile: RidingProfile) {
+        if (currentProfile == profile) return
+        currentProfile = profile
+        orientationEstimator.setProfile(profile)
+        // If actively listening on internal sensors, re-register with the updated sampling rate
+        if (isListening && activeMode != SensorMode.EXTERNAL_BLE) {
+            val mode = requestedMode
+            stop()
+            start(mode, profile)
+        }
+    }
+
+    fun start(mode: SensorMode, profile: RidingProfile = currentProfile) {
         if (isListening) stop()
         requestedMode = mode
+        currentProfile = profile
+        orientationEstimator.setProfile(profile)
 
         val (resolvedMode, activeName) = resolveModeAndSensor(mode)
         activeMode = resolvedMode
 
         orientationEstimator.reset()
 
+        // Sports: SENSOR_DELAY_FASTEST (low latency, high bandwidth)
+        // Casual: SENSOR_DELAY_GAME (balanced, smooth update rate)
+        val sensorDelay = if (profile == RidingProfile.SPORTS) {
+            SensorManager.SENSOR_DELAY_FASTEST
+        } else {
+            SensorManager.SENSOR_DELAY_GAME
+        }
+
         // Register ONLY required sensors
         when (resolvedMode) {
             SensorMode.GAME_ROTATION_VECTOR -> {
                 if (gameRotationSensor != null) {
-                    systemSensorManager.registerListener(this, gameRotationSensor, SensorManager.SENSOR_DELAY_GAME)
-                    Log.d("LeanSensorManager", "Registered ONLY: Sensor.TYPE_GAME_ROTATION_VECTOR")
+                    systemSensorManager.registerListener(this, gameRotationSensor, sensorDelay)
+                    Log.d("LeanSensorManager", "Registered ONLY: Sensor.TYPE_GAME_ROTATION_VECTOR (delay=$sensorDelay)")
                 }
             }
             SensorMode.ROTATION_VECTOR -> {
                 if (rotationVectorSensor != null) {
-                    systemSensorManager.registerListener(this, rotationVectorSensor, SensorManager.SENSOR_DELAY_GAME)
-                    Log.d("LeanSensorManager", "Registered ONLY: Sensor.TYPE_ROTATION_VECTOR")
+                    systemSensorManager.registerListener(this, rotationVectorSensor, sensorDelay)
+                    Log.d("LeanSensorManager", "Registered ONLY: Sensor.TYPE_ROTATION_VECTOR (delay=$sensorDelay)")
                 }
             }
             SensorMode.FUSED_GYRO_ACCEL -> {
                 if (accelerometerSensor != null) {
-                    systemSensorManager.registerListener(this, accelerometerSensor, SensorManager.SENSOR_DELAY_GAME)
+                    systemSensorManager.registerListener(this, accelerometerSensor, sensorDelay)
                 }
                 if (gyroscopeSensor != null) {
-                    systemSensorManager.registerListener(this, gyroscopeSensor, SensorManager.SENSOR_DELAY_GAME)
+                    systemSensorManager.registerListener(this, gyroscopeSensor, sensorDelay)
                 }
-                Log.d("LeanSensorManager", "Registered: Sensor.TYPE_ACCELEROMETER + Sensor.TYPE_GYROSCOPE")
+                Log.d("LeanSensorManager", "Registered: Sensor.TYPE_ACCELEROMETER + Sensor.TYPE_GYROSCOPE (delay=$sensorDelay)")
             }
             SensorMode.ACCEL_ONLY, SensorMode.AUTOMATIC -> {
                 if (accelerometerSensor != null) {
-                    systemSensorManager.registerListener(this, accelerometerSensor, SensorManager.SENSOR_DELAY_GAME)
-                    Log.d("LeanSensorManager", "Registered ONLY: Sensor.TYPE_ACCELEROMETER")
+                    systemSensorManager.registerListener(this, accelerometerSensor, sensorDelay)
+                    Log.d("LeanSensorManager", "Registered ONLY: Sensor.TYPE_ACCELEROMETER (delay=$sensorDelay)")
                 }
             }
             SensorMode.EXTERNAL_BLE -> {

@@ -54,8 +54,35 @@ data class LeanState(
     val bleLastPacket: com.example.lean.bluetooth.BlePacket? = null,
     val bleErrorMessage: String? = null,
     val isBleSensorActive: Boolean = false,
-    val isExternalSensorConnected: Boolean = false
+    val isExternalSensorConnected: Boolean = false,
+    // Riding profile integration
+    val ridingProfile: RidingProfile = RidingProfile.SPORTS,
+    val esp32RidingProfile: RidingProfile? = null,
+    val isProfileSynchronizing: Boolean = false
 ) {
+    /**
+     * Whether the active riding profile is confirmed and synchronized on the ESP32.
+     */
+    val isProfileSynchronizedWithEsp32: Boolean
+        get() = isExternalSensorConnected && (esp32RidingProfile == ridingProfile)
+
+    /**
+     * Human-readable description of current profile status across phone & ESP32.
+     */
+    val profileStatusDescription: String
+        get() {
+            return if (isBleSensorActive) {
+                if (!isExternalSensorConnected) {
+                    "ACTIVE ON PHONE (ESP32 DISCONNECTED)"
+                } else if (isProfileSynchronizing || esp32RidingProfile != ridingProfile) {
+                    "SYNCING WITH ESP32..."
+                } else {
+                    "SYNCHRONIZED (ESP32 & PHONE)"
+                }
+            } else {
+                "ACTIVE ON PHONE SENSORS"
+            }
+        }
     /**
      * Whether BLE automatic calibration is actively in progress on ESP32.
      */

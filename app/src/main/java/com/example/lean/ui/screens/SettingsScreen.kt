@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -36,8 +37,10 @@ import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.BluetoothConnected
 import androidx.compose.material.icons.filled.BluetoothDisabled
 import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.DirectionsBike
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -70,6 +73,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.example.lean.data.AppThemeMode
+import com.example.lean.data.RidingProfile
 import com.example.lean.data.SensorMode
 import com.example.lean.data.SmoothingLevel
 import com.example.lean.data.UserSettings
@@ -102,6 +106,7 @@ fun SettingsScreen(
     leanState: com.example.lean.data.LeanState? = null,
     onThemeModeChange: (AppThemeMode) -> Unit,
     onSensorModeChange: (SensorMode) -> Unit,
+    onRidingProfileChange: (RidingProfile) -> Unit = {},
     onSmoothingLevelChange: (SmoothingLevel) -> Unit,
     onKeepScreenAwakeChange: (Boolean) -> Unit,
     onLockOrientationChange: (Boolean) -> Unit,
@@ -432,6 +437,80 @@ fun SettingsScreen(
                                 }
                             }
                         }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            // Section 2A-Profile: Operating Profile
+            SettingsSectionHeader("OPERATING RIDING PROFILE")
+
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(16.dp))
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        ProfileSettingCard(
+                            profile = RidingProfile.SPORTS,
+                            selected = settings.ridingProfile == RidingProfile.SPORTS,
+                            icon = Icons.Default.Speed,
+                            title = "SPORTS",
+                            subtitle = "Track & performance (44Hz / 16Hz LPF)",
+                            modifier = Modifier.weight(1f),
+                            onClick = { onRidingProfileChange(RidingProfile.SPORTS) }
+                        )
+
+                        ProfileSettingCard(
+                            profile = RidingProfile.CASUAL,
+                            selected = settings.ridingProfile == RidingProfile.CASUAL,
+                            icon = Icons.Default.DirectionsBike,
+                            title = "CASUAL",
+                            subtitle = "Daily & highway (21Hz / 6-7Hz LPF)",
+                            modifier = Modifier.weight(1f),
+                            onClick = { onRidingProfileChange(RidingProfile.CASUAL) }
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    val isBleActive = leanState?.activeMode == SensorMode.EXTERNAL_BLE
+                    val syncText = when {
+                        !isBleActive -> "Profile active on phone internal sensors"
+                        leanState?.isExternalSensorConnected != true -> "Active on phone (ESP32 disconnected)"
+                        leanState.isProfileSynchronizing || leanState.esp32RidingProfile != settings.ridingProfile ->
+                            "Synchronizing with ESP32 sensor..."
+                        else -> "Synchronized with ESP32 (${leanState.esp32RidingProfile?.displayName})"
+                    }
+                    val syncColor = when {
+                        !isBleActive -> MaterialTheme.colorScheme.primaryCyan
+                        leanState?.isExternalSensorConnected != true -> MaterialTheme.colorScheme.textMuted
+                        leanState.isProfileSynchronizing || leanState.esp32RidingProfile != settings.ridingProfile ->
+                            MaterialTheme.colorScheme.warningAmber
+                        else -> MaterialTheme.colorScheme.primaryLime
+                    }
+
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(syncColor)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = syncText,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = syncColor
+                        )
                     }
                 }
             }
@@ -1232,5 +1311,52 @@ private fun ThresholdSlider(
                 inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant
             )
         )
+    }
+}
+
+@Composable
+private fun ProfileSettingCard(
+    profile: RidingProfile,
+    selected: Boolean,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    val borderColor = if (selected) MaterialTheme.colorScheme.primaryCyan else MaterialTheme.colorScheme.outline
+    val containerColor = if (selected) MaterialTheme.colorScheme.primaryCyan.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surface
+
+    Card(
+        onClick = onClick,
+        colors = CardDefaults.cardColors(containerColor = containerColor),
+        shape = RoundedCornerShape(12.dp),
+        modifier = modifier.border(if (selected) 2.dp else 1.dp, borderColor, RoundedCornerShape(12.dp))
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = title,
+                tint = if (selected) MaterialTheme.colorScheme.primaryCyan else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(24.dp)
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = title,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (selected) MaterialTheme.colorScheme.primaryCyan else MaterialTheme.colorScheme.onSurface
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = subtitle,
+                fontSize = 10.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            )
+        }
     }
 }

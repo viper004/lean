@@ -3,6 +3,7 @@ package com.example.lean.settings
 import android.content.Context
 import android.content.SharedPreferences
 import com.example.lean.data.AppThemeMode
+import com.example.lean.data.RidingProfile
 import com.example.lean.data.SensorMode
 import com.example.lean.data.SmoothingLevel
 import com.example.lean.data.UserSettings
@@ -14,6 +15,7 @@ class SettingsRepository(context: Context) {
     fun getSettings(): UserSettings {
         val themeName = prefs.getString(KEY_THEME_MODE, AppThemeMode.DARK.name) ?: AppThemeMode.DARK.name
         val modeName = prefs.getString(KEY_SENSOR_MODE, SensorMode.AUTOMATIC.name) ?: SensorMode.AUTOMATIC.name
+        val profileName = prefs.getString(KEY_RIDING_PROFILE, RidingProfile.SPORTS.name) ?: RidingProfile.SPORTS.name
         val smoothingName = prefs.getString(KEY_SMOOTHING_LEVEL, SmoothingLevel.MEDIUM.name) ?: SmoothingLevel.MEDIUM.name
         val keepAwake = prefs.getBoolean(KEY_KEEP_SCREEN_AWAKE, true)
         val lockOrientation = prefs.getBoolean(KEY_LOCK_ORIENTATION, false)
@@ -29,11 +31,13 @@ class SettingsRepository(context: Context) {
 
         val themeMode = runCatching { AppThemeMode.valueOf(themeName) }.getOrDefault(AppThemeMode.DARK)
         val sensorMode = runCatching { SensorMode.valueOf(modeName) }.getOrDefault(SensorMode.AUTOMATIC)
+        val ridingProfile = RidingProfile.fromName(profileName)
         val smoothingLevel = runCatching { SmoothingLevel.valueOf(smoothingName) }.getOrDefault(SmoothingLevel.MEDIUM)
 
         return UserSettings(
             themeMode = themeMode,
             sensorMode = sensorMode,
+            ridingProfile = ridingProfile,
             smoothingLevel = smoothingLevel,
             keepScreenAwake = keepAwake,
             lockOrientation = lockOrientation,
@@ -55,6 +59,10 @@ class SettingsRepository(context: Context) {
 
     fun saveSensorMode(mode: SensorMode) {
         prefs.edit().putString(KEY_SENSOR_MODE, mode.name).apply()
+    }
+
+    fun saveRidingProfile(profile: RidingProfile) {
+        prefs.edit().putString(KEY_RIDING_PROFILE, profile.name).apply()
     }
 
     fun saveSmoothingLevel(level: SmoothingLevel) {
@@ -114,6 +122,7 @@ class SettingsRepository(context: Context) {
         private const val PREFS_NAME = "lean_angle_prefs"
         private const val KEY_THEME_MODE = "app_theme_mode"
         private const val KEY_SENSOR_MODE = "sensor_mode"
+        private const val KEY_RIDING_PROFILE = "riding_profile"
         private const val KEY_SMOOTHING_LEVEL = "smoothing_level"
         private const val KEY_KEEP_SCREEN_AWAKE = "keep_screen_awake"
         private const val KEY_LOCK_ORIENTATION = "lock_orientation"

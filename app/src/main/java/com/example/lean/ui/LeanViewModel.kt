@@ -14,6 +14,7 @@ import com.example.lean.data.AppThemeMode
 import com.example.lean.data.LeanState
 import com.example.lean.data.RideEntity
 import com.example.lean.data.RideState
+import com.example.lean.data.RidingProfile
 import com.example.lean.data.SensorMode
 import com.example.lean.data.SmoothingLevel
 import com.example.lean.data.UserSettings
@@ -184,6 +185,27 @@ class LeanViewModel(application: Application) : AndroidViewModel(application), S
             bleManager.packetStream.collect { packet ->
                 onBlePacketReceived(packet)
             }
+        }
+
+        // Observe ESP32 confirmed operating profile
+        viewModelScope.launch {
+            bleManager.esp32RidingProfile.collect { esp32Profile ->
+                _uiState.update { it.copy(esp32RidingProfile = esp32Profile) }
+            }
+        }
+
+        // Observe BLE profile synchronization progress
+        viewModelScope.launch {
+            bleManager.isProfileSynchronizing.collect { syncing ->
+                _uiState.update { it.copy(isProfileSynchronizing = syncing) }
+            }
+        }
+
+        // Initialize sensor manager and BLE manager with preferred riding profile
+        sensorManager.setProfile(loadedSettings.ridingProfile)
+        bleManager.setDesiredRidingProfile(loadedSettings.ridingProfile)
+        _uiState.update {
+            it.copy(ridingProfile = loadedSettings.ridingProfile)
         }
 
         applySensorMode(loadedSettings.sensorMode)
@@ -528,6 +550,32 @@ class LeanViewModel(application: Application) : AndroidViewModel(application), S
         applySensorMode(mode)
     }
 
+    /**
+     * Updates the riding profile (SPORTS or CASUAL) throughout the entire pipeline:
+     * 1. Persists preference in SettingsRepository.
+     * 2. Configures Android internal sensor rate & filter weighting.
+     * 3. Dispatches mode command to ESP32 over BLE (with acknowledgement tracking).
+     * 4. Updates live UI states smoothly without resetting active calibration or lean peaks.
+     */
+    fun updateRidingProfile(profile: RidingProfile) {
+        if (_userSettings.value.ridingProfile == profile && _uiState.value.ridingProfile == profile) return
+        _userSettings.update { it.copy(ridingProfile = profile) }
+        settingsRepository.saveRidingProfile(profile)
+
+        // Update phone internal sensors
+        sensorManager.setProfile(profile)
+
+        // Synchronize with ESP32 if BLE is active/connecting/connected
+        bleManager.setDesiredRidingProfile(profile)
+
+        _uiState.update {
+            it.copy(
+                ridingProfile = profile,
+                isProfileSynchronizing = bleManager.isProfileSynchronizing.value
+            )
+        }
+    }
+
     private fun applySensorMode(mode: SensorMode) {
         if (mode == SensorMode.EXTERNAL_BLE) {
             // Mutual exclusion: stop phone sensors completely to avoid concurrent updates
@@ -729,8 +777,10 @@ class LeanViewModel(application: Application) : AndroidViewModel(application), S
         }
         previousRawLeanAngle = clampedRawAngle
 
-        // Fast smoothing filter: filteredAngle = alpha * previousFilteredAngle + (1 - alpha) * currentAngle
-        val alpha = _userSettings.value.smoothingLevel.alpha
+        // Profile-aware smoothing filter:
+        // Sports Mode: alpha = 0.55f (rapid responsiveness, track performance)
+        // Casual Mode: alpha = 0.88f (strong smoothing, vibration suppression)
+        val alpha = if (_userSettings.value.ridingProfile == RidingProfile.SPORTS) 0.55f else 0.88f
         val currentFiltered = _uiState.value.filteredAngleDegrees
         val newFiltered = alpha * currentFiltered + (1f - alpha) * clampedRawAngle
 

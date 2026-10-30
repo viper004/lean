@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import com.example.lean.data.RidingProfile
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -317,6 +318,7 @@ class MainActivity : ComponentActivity() {
                                         leanState = uiState,
                                         locationData = locationData,
                                         isGpsSettingEnabled = userSettings.isGpsEnabled,
+                                        onProfileSelected = { viewModel.updateRidingProfile(it) },
                                         onCenterAndStartClick = {
                                             viewModel.startRideWithCalibration(
                                                 onSuccess = {
@@ -338,6 +340,10 @@ class MainActivity : ComponentActivity() {
                                         locationData = locationData,
                                         isGpsSettingEnabled = userSettings.isGpsEnabled,
                                         onReCenterClick = { viewModel.calibrateZero() },
+                                        onProfileToggle = {
+                                            val next = if (uiState.ridingProfile == RidingProfile.SPORTS) RidingProfile.CASUAL else RidingProfile.SPORTS
+                                            viewModel.updateRidingProfile(next)
+                                        },
                                         onEndRideConfirmed = {
                                             viewModel.endRide()
                                             navController.navigate("ride_summary") {
@@ -410,6 +416,7 @@ class MainActivity : ComponentActivity() {
                                         leanState = uiState,
                                         onThemeModeChange = { viewModel.updateThemeMode(it) },
                                         onSensorModeChange = { viewModel.updateSensorMode(it) },
+                                        onRidingProfileChange = { viewModel.updateRidingProfile(it) },
                                         onSmoothingLevelChange = { viewModel.updateSmoothingLevel(it) },
                                         onKeepScreenAwakeChange = { viewModel.updateKeepScreenAwake(it) },
                                         onLockOrientationChange = { viewModel.updateLockOrientation(it) },

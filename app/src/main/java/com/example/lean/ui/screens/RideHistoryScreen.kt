@@ -184,13 +184,22 @@ fun HistoryRideCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = formattedDate,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primaryCyan,
-                    letterSpacing = 1.0.sp
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = formattedDate,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primaryCyan,
+                        letterSpacing = 1.0.sp
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "• ${ride.ridingProfile}",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.textMuted
+                    )
+                }
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     IconButton(

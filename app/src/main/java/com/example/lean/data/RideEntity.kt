@@ -29,5 +29,6 @@ data class RideEntity(
     val distanceKm: Float = 0f,
     val averageSpeedKmh: Float = 0f,
     val maxSpeedKmh: Float = 0f,
-    val isGpsEnabled: Boolean = false
+    val isGpsEnabled: Boolean = false,
+    val ridingProfile: String = "SPORTS"
 )
