@@ -45,9 +45,34 @@ enum class BleConnectionState {
 }
 
 /**
+ * Calibration status reported by the ESP32 IoT sensor.
+ *
+ * Status protocol:
+ * - 0x00 = Idle / Uncalibrated
+ * - 0x01 = Calibrating (collecting stationary sensor samples)
+ * - 0x02 = Calibration successful (reference zero & gyro bias locked)
+ * - 0x03 = Calibration failed (sensor unstable or vehicle moved)
+ */
+enum class BleCalibrationStatus(val code: Int) {
+    IDLE(0x00),
+    CALIBRATING(0x01),
+    SUCCESS(0x02),
+    FAILED(0x03);
+
+    companion object {
+        fun fromByte(b: Byte): BleCalibrationStatus = when (b.toInt() and 0xFF) {
+            0x01 -> CALIBRATING
+            0x02 -> SUCCESS
+            0x03 -> FAILED
+            else -> IDLE
+        }
+    }
+}
+
+/**
  * Low-level Bluetooth Low Energy manager responsible for scanning, connecting,
- * discovering services, subscribing to GATT notifications, and parsing sensor telemetry packets
- * from the ESP32 LEAN IoT device.
+ * discovering services, subscribing to GATT notifications, sending calibration requests,
+ * and parsing sensor telemetry packets from the ESP32 LEAN IoT device.
  */
 class LeanBleManager(private val context: Context) {
 
@@ -57,9 +82,12 @@ class LeanBleManager(private val context: Context) {
         const val TARGET_DEVICE_NAME = "LEAN_IOT"
         val SERVICE_UUID: UUID = UUID.fromString("7b8e0001-7a4d-4f2b-9c3a-6d1e5f000001")
         val CHARACTERISTIC_UUID: UUID = UUID.fromString("7b8e0002-7a4d-4f2b-9c3a-6d1e5f000001")
+        val CALIBRATION_COMMAND_UUID: UUID = UUID.fromString("7b8e0003-7a4d-4f2b-9c3a-6d1e5f000001")
+        val CALIBRATION_STATUS_UUID: UUID = UUID.fromString("7b8e0004-7a4d-4f2b-9c3a-6d1e5f000001")
         val CCCD_UUID: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
 
         private const val DEFAULT_SCAN_TIMEOUT_MS = 15000L
+        private const val CALIBRATION_TIMEOUT_MS = 6000L
     }
 
     private val bluetoothManager: BluetoothManager? =
@@ -70,11 +98,18 @@ class LeanBleManager(private val context: Context) {
     private var bluetoothGatt: BluetoothGatt? = null
     private var bleScanner: BluetoothLeScanner? = null
 
+    private var telemetryCharacteristic: BluetoothGattCharacteristic? = null
+    private var calibrationCommandCharacteristic: BluetoothGattCharacteristic? = null
+    private var calibrationStatusCharacteristic: BluetoothGattCharacteristic? = null
+
     private val mainHandler = Handler(Looper.getMainLooper())
 
     // Observable States
     private val _connectionState = MutableStateFlow(BleConnectionState.DISCONNECTED)
     val connectionState: StateFlow<BleConnectionState> = _connectionState.asStateFlow()
+
+    private val _calibrationStatus = MutableStateFlow(BleCalibrationStatus.IDLE)
+    val calibrationStatus: StateFlow<BleCalibrationStatus> = _calibrationStatus.asStateFlow()
 
     private val _latestPacket = MutableStateFlow<BlePacket?>(null)
     val latestPacket: StateFlow<BlePacket?> = _latestPacket.asStateFlow()
@@ -102,6 +137,8 @@ class LeanBleManager(private val context: Context) {
             _lastErrorMessage.value = "Device '$TARGET_DEVICE_NAME' not found"
         }
     }
+
+    private var calibrationTimeoutRunnable: Runnable? = null
 
     /**
      * Checks if all required runtime permissions for BLE operation are granted
@@ -273,11 +310,86 @@ class LeanBleManager(private val context: Context) {
     }
 
     /**
+     * Requests the ESP32 to initiate automatic calibration (0x01).
+     *
+     * Calibration lasts approximately 2 seconds on the ESP32.
+     * The ESP32 will notify progress (0x01 = Calibrating) and outcome (0x02 = Success, 0x03 = Failed).
+     */
+    @SuppressLint("MissingPermission")
+    fun requestCalibration(): Boolean {
+        val gatt = bluetoothGatt
+        val commandChar = calibrationCommandCharacteristic
+        if (gatt == null || commandChar == null || _connectionState.value != BleConnectionState.CONNECTED) {
+            Log.e(TAG, "Cannot request calibration: BLE not connected or calibration command characteristic missing")
+            _lastErrorMessage.value = "Cannot calibrate: sensor not connected"
+            return false
+        }
+
+        _calibrationStatus.value = BleCalibrationStatus.CALIBRATING
+        _lastErrorMessage.value = null
+
+        val cmdBytes = byteArrayOf(0x01)
+        val success = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            gatt.writeCharacteristic(
+                commandChar,
+                cmdBytes,
+                BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+            ) == BluetoothStatusCodes.SUCCESS
+        } else {
+            @Suppress("DEPRECATION")
+            commandChar.value = cmdBytes
+            @Suppress("DEPRECATION")
+            commandChar.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+            @Suppress("DEPRECATION")
+            gatt.writeCharacteristic(commandChar)
+        }
+
+        if (!success) {
+            Log.e(TAG, "Failed to initiate characteristic write for calibration request")
+            _calibrationStatus.value = BleCalibrationStatus.FAILED
+            _lastErrorMessage.value = "Failed to send calibration command to sensor"
+            return false
+        }
+
+        Log.d(TAG, "Calibration command 0x01 dispatched to ESP32. Awaiting result...")
+
+        // Guard timeout in case of unexpected sensor freeze or packet loss
+        cancelCalibrationTimeout()
+        val timeoutRunnable = Runnable {
+            if (_calibrationStatus.value == BleCalibrationStatus.CALIBRATING) {
+                Log.w(TAG, "Calibration timed out after $CALIBRATION_TIMEOUT_MS ms")
+                _calibrationStatus.value = BleCalibrationStatus.FAILED
+                _lastErrorMessage.value = "Calibration timed out. Please keep stationary and retry."
+            }
+        }
+        calibrationTimeoutRunnable = timeoutRunnable
+        mainHandler.postDelayed(timeoutRunnable, CALIBRATION_TIMEOUT_MS)
+
+        return true
+    }
+
+    /**
+     * Resets calibration state back to IDLE.
+     */
+    fun resetCalibrationState() {
+        cancelCalibrationTimeout()
+        _calibrationStatus.value = BleCalibrationStatus.IDLE
+    }
+
+    private fun cancelCalibrationTimeout() {
+        calibrationTimeoutRunnable?.let {
+            mainHandler.removeCallbacks(it)
+            calibrationTimeoutRunnable = null
+        }
+    }
+
+    /**
      * Disconnects from the current GATT connection and resets connection state.
      */
     @SuppressLint("MissingPermission")
     fun disconnect() {
         stopScan()
+        cancelCalibrationTimeout()
         if (_connectionState.value != BleConnectionState.DISCONNECTED) {
             _connectionState.value = BleConnectionState.DISCONNECTING
             try {
@@ -297,6 +409,7 @@ class LeanBleManager(private val context: Context) {
      */
     fun cleanup() {
         mainHandler.removeCallbacksAndMessages(null)
+        cancelCalibrationTimeout()
         stopScan()
         disconnect()
     }
@@ -309,8 +422,12 @@ class LeanBleManager(private val context: Context) {
             Log.w(TAG, "Exception closing BluetoothGatt: ${e.message}")
         }
         bluetoothGatt = null
+        telemetryCharacteristic = null
+        calibrationCommandCharacteristic = null
+        calibrationStatusCharacteristic = null
         _connectedDeviceAddress.value = null
         _connectedDeviceName.value = null
+        cancelCalibrationTimeout()
     }
 
     private fun processIncomingBytes(bytes: ByteArray) {
@@ -320,6 +437,33 @@ class LeanBleManager(private val context: Context) {
             _packetStream.tryEmit(packet)
         } else {
             Log.w(TAG, "Rejected malformed or unexpected BLE packet (${bytes.size} bytes)")
+        }
+    }
+
+    private fun processIncomingCalibrationStatus(bytes: ByteArray) {
+        if (bytes.isNotEmpty()) {
+            val status = BleCalibrationStatus.fromByte(bytes[0])
+            Log.d(TAG, "Received ESP32 calibration status update: $status (0x%02X)".format(bytes[0]))
+            if (status == BleCalibrationStatus.SUCCESS || status == BleCalibrationStatus.FAILED) {
+                cancelCalibrationTimeout()
+            }
+            _calibrationStatus.value = status
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun writeDescriptorCompat(
+        gatt: BluetoothGatt,
+        descriptor: BluetoothGattDescriptor,
+        value: ByteArray
+    ): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            gatt.writeDescriptor(descriptor, value) == BluetoothStatusCodes.SUCCESS
+        } else {
+            @Suppress("DEPRECATION")
+            descriptor.value = value
+            @Suppress("DEPRECATION")
+            gatt.writeDescriptor(descriptor)
         }
     }
 
@@ -366,6 +510,9 @@ class LeanBleManager(private val context: Context) {
             if (status != BluetoothGatt.GATT_SUCCESS) {
                 Log.e(TAG, "GATT connection failure with status: $status")
                 _lastErrorMessage.value = "Connection failed with GATT status $status"
+                if (_calibrationStatus.value == BleCalibrationStatus.CALIBRATING) {
+                    _calibrationStatus.value = BleCalibrationStatus.FAILED
+                }
                 closeGatt()
                 _connectionState.value = BleConnectionState.DISCONNECTED
                 return
@@ -386,6 +533,10 @@ class LeanBleManager(private val context: Context) {
                 }
                 BluetoothProfile.STATE_DISCONNECTED -> {
                     Log.d(TAG, "Disconnected from GATT server")
+                    if (_calibrationStatus.value == BleCalibrationStatus.CALIBRATING) {
+                        _calibrationStatus.value = BleCalibrationStatus.FAILED
+                        _lastErrorMessage.value = "Sensor disconnected during calibration"
+                    }
                     closeGatt()
                     _connectionState.value = BleConnectionState.DISCONNECTED
                 }
@@ -412,51 +563,47 @@ class LeanBleManager(private val context: Context) {
                 return
             }
 
-            val characteristic = service.getCharacteristic(CHARACTERISTIC_UUID)
-            if (characteristic == null) {
-                Log.e(TAG, "Target characteristic not found: $CHARACTERISTIC_UUID")
-                _lastErrorMessage.value = "Target characteristic not found"
+            // Cache characteristic references
+            telemetryCharacteristic = service.getCharacteristic(CHARACTERISTIC_UUID)
+            calibrationCommandCharacteristic = service.getCharacteristic(CALIBRATION_COMMAND_UUID)
+            calibrationStatusCharacteristic = service.getCharacteristic(CALIBRATION_STATUS_UUID)
+
+            val telemetryChar = telemetryCharacteristic
+            if (telemetryChar == null) {
+                Log.e(TAG, "Target telemetry characteristic not found: $CHARACTERISTIC_UUID")
+                _lastErrorMessage.value = "Telemetry characteristic not found"
                 closeGatt()
                 _connectionState.value = BleConnectionState.DISCONNECTED
                 return
             }
 
             try {
-                // Enable local notification
-                val notifyEnabled = gatt.setCharacteristicNotification(characteristic, true)
+                // Step 1: Subscribe to telemetry notifications sequentially
+                val notifyEnabled = gatt.setCharacteristicNotification(telemetryChar, true)
                 if (!notifyEnabled) {
-                    Log.e(TAG, "Failed to enable local characteristic notifications")
+                    Log.e(TAG, "Failed to enable local characteristic notifications for telemetry")
                     _lastErrorMessage.value = "Failed to enable characteristic notifications"
                     closeGatt()
                     _connectionState.value = BleConnectionState.DISCONNECTED
                     return
                 }
 
-                // Write CCCD (0x2902) to subscribe to remote notifications on ESP32
-                val cccdDescriptor = characteristic.getDescriptor(CCCD_UUID)
-                if (cccdDescriptor == null) {
-                    Log.e(TAG, "CCCD descriptor 0x2902 not found on characteristic")
+                val telemetryCccd = telemetryChar.getDescriptor(CCCD_UUID)
+                if (telemetryCccd == null) {
+                    Log.e(TAG, "CCCD descriptor 0x2902 not found on telemetry characteristic")
                     _lastErrorMessage.value = "Notification descriptor missing"
                     closeGatt()
                     _connectionState.value = BleConnectionState.DISCONNECTED
                     return
                 }
 
-                Log.d(TAG, "Writing CCCD descriptor to subscribe to notifications...")
-                val writeInitiated = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    gatt.writeDescriptor(
-                        cccdDescriptor,
-                        BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-                    ) == BluetoothStatusCodes.SUCCESS
-                } else {
-                    @Suppress("DEPRECATION")
-                    cccdDescriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-                    @Suppress("DEPRECATION")
-                    gatt.writeDescriptor(cccdDescriptor)
-                }
+                Log.d(TAG, "Writing CCCD descriptor to subscribe to telemetry notifications...")
+                val writeInitiated = writeDescriptorCompat(
+                    gatt, telemetryCccd, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                )
 
                 if (!writeInitiated) {
-                    Log.e(TAG, "Failed to initiate descriptor write for notifications")
+                    Log.e(TAG, "Failed to initiate descriptor write for telemetry notifications")
                     _lastErrorMessage.value = "Failed to initiate notification subscription"
                     closeGatt()
                     _connectionState.value = BleConnectionState.DISCONNECTED
@@ -476,22 +623,72 @@ class LeanBleManager(private val context: Context) {
             status: Int
         ) {
             if (descriptor.uuid == CCCD_UUID) {
-                if (status == BluetoothGatt.GATT_SUCCESS) {
-                    Log.d(TAG, "CCCD descriptor write success. Connection fully established!")
-                    _connectionState.value = BleConnectionState.CONNECTED
-                    _lastErrorMessage.value = null
-
-                    // Request low-latency connection priority for smooth live gauge feedback
-                    try {
-                        gatt.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH)
-                    } catch (e: SecurityException) {
-                        Log.w(TAG, "Permission denied for requestConnectionPriority: ${e.message}")
-                    }
-                } else {
+                if (status != BluetoothGatt.GATT_SUCCESS) {
                     Log.e(TAG, "CCCD descriptor write failed with status: $status")
                     _lastErrorMessage.value = "Failed to subscribe to notifications (status $status)"
                     closeGatt()
                     _connectionState.value = BleConnectionState.DISCONNECTED
+                    return
+                }
+
+                val charUuid = descriptor.characteristic?.uuid
+                if (charUuid == CHARACTERISTIC_UUID) {
+                    Log.d(TAG, "Telemetry CCCD write success. Subscribing to calibration status...")
+
+                    val statusChar = calibrationStatusCharacteristic
+                    if (statusChar != null) {
+                        try {
+                            gatt.setCharacteristicNotification(statusChar, true)
+                            val statusCccd = statusChar.getDescriptor(CCCD_UUID)
+                            if (statusCccd != null) {
+                                val writeNext = writeDescriptorCompat(
+                                    gatt, statusCccd, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                                )
+                                if (writeNext) {
+                                    // Await onDescriptorWrite for CALIBRATION_STATUS_UUID
+                                    return
+                                }
+                            }
+                        } catch (e: SecurityException) {
+                            Log.w(TAG, "SecurityException subscribing to calibration status", e)
+                        }
+                    }
+
+                    // If status char subscription is not needed or absent, finish setup
+                    finishConnectionSetup(gatt)
+                } else if (charUuid == CALIBRATION_STATUS_UUID) {
+                    Log.d(TAG, "Calibration status CCCD write success. Connection fully established!")
+                    finishConnectionSetup(gatt)
+                }
+            }
+        }
+
+        @SuppressLint("MissingPermission")
+        private fun finishConnectionSetup(gatt: BluetoothGatt) {
+            _connectionState.value = BleConnectionState.CONNECTED
+            _lastErrorMessage.value = null
+
+            // Request low-latency connection priority for smooth live gauge feedback
+            try {
+                gatt.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH)
+            } catch (e: SecurityException) {
+                Log.w(TAG, "Permission denied for requestConnectionPriority: ${e.message}")
+            }
+        }
+
+        override fun onCharacteristicWrite(
+            gatt: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic,
+            status: Int
+        ) {
+            if (characteristic.uuid == CALIBRATION_COMMAND_UUID) {
+                if (status == BluetoothGatt.GATT_SUCCESS) {
+                    Log.d(TAG, "Calibration command successfully written to ESP32 characteristic")
+                } else {
+                    Log.e(TAG, "Failed to write calibration command to ESP32: status $status")
+                    cancelCalibrationTimeout()
+                    _calibrationStatus.value = BleCalibrationStatus.FAILED
+                    _lastErrorMessage.value = "Failed to send calibration command (status $status)"
                 }
             }
         }
@@ -502,8 +699,9 @@ class LeanBleManager(private val context: Context) {
             characteristic: BluetoothGattCharacteristic,
             value: ByteArray
         ) {
-            if (characteristic.uuid == CHARACTERISTIC_UUID) {
-                processIncomingBytes(value)
+            when (characteristic.uuid) {
+                CHARACTERISTIC_UUID -> processIncomingBytes(value)
+                CALIBRATION_STATUS_UUID -> processIncomingCalibrationStatus(value)
             }
         }
 
@@ -514,8 +712,10 @@ class LeanBleManager(private val context: Context) {
             characteristic: BluetoothGattCharacteristic
         ) {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
-                if (characteristic.uuid == CHARACTERISTIC_UUID) {
-                    characteristic.value?.let { processIncomingBytes(it) }
+                val bytes = characteristic.value ?: return
+                when (characteristic.uuid) {
+                    CHARACTERISTIC_UUID -> processIncomingBytes(bytes)
+                    CALIBRATION_STATUS_UUID -> processIncomingCalibrationStatus(bytes)
                 }
             }
         }

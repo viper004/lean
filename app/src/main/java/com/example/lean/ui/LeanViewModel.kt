@@ -1,8 +1,10 @@
 package com.example.lean.ui
 
 import android.app.Application
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.lean.bluetooth.BleCalibrationStatus
 import com.example.lean.bluetooth.BleConnectionState
 import com.example.lean.bluetooth.BlePacket
 import com.example.lean.bluetooth.LeanBleManager
@@ -55,9 +57,10 @@ class LeanViewModel(application: Application) : AndroidViewModel(application), S
 
     val bleConnectionState: StateFlow<BleConnectionState> = bleManager.connectionState
     val latestBlePacket: StateFlow<BlePacket?> = bleManager.latestPacket
+    val bleCalibrationStatus: StateFlow<BleCalibrationStatus> = bleManager.calibrationStatus
 
-    private var esp32ZeroOffsetAngle: Float = 0f
     private var latestBleAngleRaw: Float = 0f
+    private var bleCalibrationJob: Job? = null
 
     private val _uiState = MutableStateFlow(LeanState())
     val uiState: StateFlow<LeanState> = _uiState.asStateFlow()
@@ -155,6 +158,27 @@ class LeanViewModel(application: Application) : AndroidViewModel(application), S
             }
         }
 
+        // Observe BLE calibration status from ESP32
+        viewModelScope.launch {
+            bleManager.calibrationStatus.collect { calStatus ->
+                _uiState.update { state ->
+                    val feedback = when (calStatus) {
+                        BleCalibrationStatus.CALIBRATING ->
+                            "Calibrating ESP32 sensor... Please keep stationary."
+                        BleCalibrationStatus.SUCCESS ->
+                            "Sensor calibrated! 0.0° reference established."
+                        BleCalibrationStatus.FAILED ->
+                            "Calibration failed: vehicle moved or sensor unstable. Retry."
+                        else -> state.feedbackMessage
+                    }
+                    state.copy(
+                        bleCalibrationStatus = calStatus,
+                        feedbackMessage = feedback
+                    )
+                }
+            }
+        }
+
         // Observe incoming BLE sensor packets
         viewModelScope.launch {
             bleManager.packetStream.collect { packet ->
@@ -179,29 +203,17 @@ class LeanViewModel(application: Application) : AndroidViewModel(application), S
         return isConnected && age <= maxAgeMs
     }
 
-    fun centerAndStartRide(): Boolean {
-        // Step 1: Calibration reference capture
-        if (_userSettings.value.sensorMode == SensorMode.EXTERNAL_BLE) {
-            if (!_uiState.value.isExternalSensorConnected || !isBleDataFresh()) {
-                _uiState.update {
-                    it.copy(feedbackMessage = "Cannot start ride: ESP32 sensor is not connected or telemetry is stale.")
-                }
-                return false
-            }
-
-            esp32ZeroOffsetAngle = latestBleAngleRaw
-            _uiState.update { state ->
-                state.copy(
-                    currentAngleDegrees = 0f,
-                    filteredAngleDegrees = 0f,
-                    isCalibrated = true,
-                    showCenteredFeedback = true,
-                    maxLeftDegrees = 0f,
-                    maxRightDegrees = 0f,
-                    possibleFallDetected = false
-                )
-            }
-        } else {
+    /**
+     * Workflow for starting a ride:
+     * - In internal phone sensor mode: performs instant zero calibration and starts ride recording.
+     * - In external BLE mode: dispatches calibration command 0x01 to ESP32, awaits calibration
+     *   success acknowledgement, and ONLY begins recording after calibration successfully finishes.
+     */
+    fun startRideWithCalibration(
+        onSuccess: () -> Unit = {},
+        onError: (String) -> Unit = {}
+    ) {
+        if (_userSettings.value.sensorMode != SensorMode.EXTERNAL_BLE) {
             calibrationManager.calibrate(latestGravity)
             _uiState.update { state ->
                 state.copy(
@@ -214,27 +226,130 @@ class LeanViewModel(application: Application) : AndroidViewModel(application), S
                     possibleFallDetected = false
                 )
             }
+
+            fallDetectionStartTimeMs = null
+            currentFallMaxAngle = 0f
+
+            if (_userSettings.value.isGpsEnabled) {
+                locationManager.startListening()
+                locationManager.resetStats()
+            }
+
+            rideRecorder.startRide(_userSettings.value)
+
+            feedbackJob?.cancel()
+            feedbackJob = viewModelScope.launch {
+                delay(1000)
+                _uiState.update { it.copy(showCenteredFeedback = false) }
+            }
+            onSuccess()
+            return
         }
 
-        fallDetectionStartTimeMs = null
-        currentFallMaxAngle = 0f
-
-        // Step 2: Reset GPS stats if enabled
-        if (_userSettings.value.isGpsEnabled) {
-            locationManager.startListening()
-            locationManager.resetStats()
+        // External BLE Mode: ensure ESP32 is actively connected and receiving fresh telemetry
+        if (!_uiState.value.isExternalSensorConnected || !isBleDataFresh()) {
+            val errorMsg = "Cannot start ride: ESP32 sensor is not connected or telemetry is stale."
+            _uiState.update {
+                it.copy(
+                    feedbackMessage = errorMsg,
+                    bleErrorMessage = errorMsg
+                )
+            }
+            onError(errorMsg)
+            return
         }
 
-        // Step 3: Start Ride Recorder
-        rideRecorder.startRide(_userSettings.value)
+        bleCalibrationJob?.cancel()
+        bleManager.resetCalibrationState()
 
-        // Visual toast feedback
-        feedbackJob?.cancel()
-        feedbackJob = viewModelScope.launch {
-            delay(1000)
-            _uiState.update { it.copy(showCenteredFeedback = false) }
+        val requested = bleManager.requestCalibration()
+        if (!requested) {
+            val errorMsg = "Failed to send calibration command to ESP32."
+            _uiState.update {
+                it.copy(
+                    feedbackMessage = errorMsg,
+                    bleErrorMessage = errorMsg
+                )
+            }
+            onError(errorMsg)
+            return
         }
-        return true
+
+        _uiState.update {
+            it.copy(feedbackMessage = "Calibrating ESP32 sensor... Please keep stationary.")
+        }
+
+        bleCalibrationJob = viewModelScope.launch {
+            bleManager.calibrationStatus.collect { status ->
+                when (status) {
+                    BleCalibrationStatus.SUCCESS -> {
+                        Log.d("LeanViewModel", "ESP32 calibration SUCCESS acknowledged. Starting ride recording.")
+                        fallDetectionStartTimeMs = null
+                        currentFallMaxAngle = 0f
+
+                        if (_userSettings.value.isGpsEnabled) {
+                            locationManager.startListening()
+                            locationManager.resetStats()
+                        }
+
+                        // Ride recording starts ONLY after successful calibration!
+                        rideRecorder.startRide(_userSettings.value)
+
+                        _uiState.update { state ->
+                            state.copy(
+                                currentAngleDegrees = 0f,
+                                filteredAngleDegrees = 0f,
+                                isCalibrated = true,
+                                showCenteredFeedback = true,
+                                maxLeftDegrees = 0f,
+                                maxRightDegrees = 0f,
+                                possibleFallDetected = false,
+                                feedbackMessage = "Calibrated! Starting ride..."
+                            )
+                        }
+
+                        feedbackJob?.cancel()
+                        feedbackJob = viewModelScope.launch {
+                            delay(1000)
+                            _uiState.update { it.copy(showCenteredFeedback = false) }
+                        }
+
+                        onSuccess()
+                        bleCalibrationJob?.cancel()
+                    }
+                    BleCalibrationStatus.FAILED -> {
+                        Log.w("LeanViewModel", "ESP32 calibration failed.")
+                        val errorMsg = "Calibration failed: vehicle moved or sensor unstable. Please keep stationary and retry."
+                        _uiState.update {
+                            it.copy(
+                                feedbackMessage = errorMsg,
+                                bleErrorMessage = errorMsg,
+                                isCalibrated = false
+                            )
+                        }
+                        onError(errorMsg)
+                        bleCalibrationJob?.cancel()
+                    }
+                    BleCalibrationStatus.CALIBRATING -> {
+                        _uiState.update {
+                            it.copy(feedbackMessage = "Calibrating ESP32 sensor... Please keep stationary.")
+                        }
+                    }
+                    BleCalibrationStatus.IDLE -> {
+                        // Awaiting response
+                    }
+                }
+            }
+        }
+    }
+
+    fun centerAndStartRide(): Boolean {
+        var started = false
+        startRideWithCalibration(
+            onSuccess = { started = true },
+            onError = { started = false }
+        )
+        return started
     }
 
     fun endRide(): RideEntity {
@@ -249,6 +364,8 @@ class LeanViewModel(application: Application) : AndroidViewModel(application), S
 
         locationManager.stopListening()
         fallDetectionStartTimeMs = null
+        bleCalibrationJob?.cancel()
+        bleManager.resetCalibrationState()
 
         // Automatically save ride and corners locally to Room
         viewModelScope.launch {
@@ -282,12 +399,16 @@ class LeanViewModel(application: Application) : AndroidViewModel(application), S
     fun discardUnfinishedRide() {
         rideRecorder.discardUnfinishedRide()
         locationManager.stopListening()
+        bleCalibrationJob?.cancel()
+        bleManager.resetCalibrationState()
     }
 
     fun returnToHomeFromRide() {
         rideRecorder.resetToIdle()
         locationManager.stopListening()
         fallDetectionStartTimeMs = null
+        bleCalibrationJob?.cancel()
+        bleManager.resetCalibrationState()
         _uiState.update { it.copy(possibleFallDetected = false) }
     }
 
@@ -299,16 +420,7 @@ class LeanViewModel(application: Application) : AndroidViewModel(application), S
                 }
                 return false
             }
-
-            esp32ZeroOffsetAngle = latestBleAngleRaw
-            _uiState.update { state ->
-                state.copy(
-                    currentAngleDegrees = 0f,
-                    filteredAngleDegrees = 0f,
-                    isCalibrated = true,
-                    showCenteredFeedback = true
-                )
-            }
+            return bleManager.requestCalibration()
         } else {
             calibrationManager.calibrate(latestGravity)
             _uiState.update { state ->
@@ -319,14 +431,13 @@ class LeanViewModel(application: Application) : AndroidViewModel(application), S
                     showCenteredFeedback = true
                 )
             }
+            feedbackJob?.cancel()
+            feedbackJob = viewModelScope.launch {
+                delay(1000)
+                _uiState.update { it.copy(showCenteredFeedback = false) }
+            }
+            return true
         }
-
-        feedbackJob?.cancel()
-        feedbackJob = viewModelScope.launch {
-            delay(1000)
-            _uiState.update { it.copy(showCenteredFeedback = false) }
-        }
-        return true
     }
 
     private fun startSmsCountdown(event: com.example.lean.data.FallEventEntity) {
@@ -388,7 +499,8 @@ class LeanViewModel(application: Application) : AndroidViewModel(application), S
     }
 
     fun resetCalibration() {
-        esp32ZeroOffsetAngle = 0f
+        bleCalibrationJob?.cancel()
+        bleManager.resetCalibrationState()
         calibrationManager.reset()
         _uiState.update { state ->
             state.copy(
@@ -572,15 +684,14 @@ class LeanViewModel(application: Application) : AndroidViewModel(application), S
 
         latestBleAngleRaw = packet.leanAngleDegrees
 
-        if (!_uiState.value.isCalibrated) {
-            esp32ZeroOffsetAngle = packet.leanAngleDegrees
-        }
-
-        val calibratedAngle = packet.leanAngleDegrees - esp32ZeroOffsetAngle
+        // The ESP32 is the single source of truth for the calibrated angle.
+        // Android directly displays and records the ESP32 calibrated angle without secondary offset.
+        val calibratedAngle = packet.leanAngleDegrees
 
         _uiState.update {
             it.copy(
                 bleLastPacket = packet,
+                isCalibrated = packet.isValidReading,
                 rawGyro = Triple(packet.gyroRollRateDps, 0f, 0f)
             )
         }

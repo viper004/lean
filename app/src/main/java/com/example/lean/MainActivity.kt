@@ -318,12 +318,13 @@ class MainActivity : ComponentActivity() {
                                         locationData = locationData,
                                         isGpsSettingEnabled = userSettings.isGpsEnabled,
                                         onCenterAndStartClick = {
-                                            val started = viewModel.centerAndStartRide()
-                                            if (started) {
-                                                navController.navigate("live_ride") {
-                                                    popUpTo("home") { inclusive = false }
+                                            viewModel.startRideWithCalibration(
+                                                onSuccess = {
+                                                    navController.navigate("live_ride") {
+                                                        popUpTo("home") { inclusive = false }
+                                                    }
                                                 }
-                                            }
+                                            )
                                         },
                                         onBackClick = { navController.popBackStack() }
                                     )

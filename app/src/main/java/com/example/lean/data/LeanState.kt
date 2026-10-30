@@ -48,6 +48,7 @@ data class LeanState(
     val currentFallEventId: Long? = null,
     // BLE integration fields
     val bleConnectionState: com.example.lean.bluetooth.BleConnectionState = com.example.lean.bluetooth.BleConnectionState.DISCONNECTED,
+    val bleCalibrationStatus: com.example.lean.bluetooth.BleCalibrationStatus = com.example.lean.bluetooth.BleCalibrationStatus.IDLE,
     val bleDeviceName: String? = null,
     val bleDeviceAddress: String? = null,
     val bleLastPacket: com.example.lean.bluetooth.BlePacket? = null,
@@ -55,6 +56,12 @@ data class LeanState(
     val isBleSensorActive: Boolean = false,
     val isExternalSensorConnected: Boolean = false
 ) {
+    /**
+     * Whether BLE automatic calibration is actively in progress on ESP32.
+     */
+    val isBleCalibrating: Boolean
+        get() = isBleSensorActive && bleCalibrationStatus == com.example.lean.bluetooth.BleCalibrationStatus.CALIBRATING
+
     /**
      * Whether telemetry data is actively available from the current sensor source.
      */

@@ -28,6 +28,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -120,7 +121,10 @@ fun PreparationScreen(
 
             // Phone / ESP32 Mounting Notice Card
             val isBleMode = leanState.activeMode == com.example.lean.data.SensorMode.EXTERNAL_BLE
+            val isCalibrating = isBleMode && leanState.bleCalibrationStatus == com.example.lean.bluetooth.BleCalibrationStatus.CALIBRATING
+            val isCalFailed = isBleMode && leanState.bleCalibrationStatus == com.example.lean.bluetooth.BleCalibrationStatus.FAILED
             val canStart = if (isBleMode) leanState.isExternalSensorConnected else true
+            val canPressStart = canStart && !isCalibrating
 
             Card(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -150,7 +154,7 @@ fun PreparationScreen(
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
                             text = if (isBleMode) {
-                                "Ensure your ESP32 sensor is powered on and secured to the motorcycle frame or handlebar. Pressing CENTER & START will define current upright motorcycle position as 0°."
+                                "Ensure your ESP32 sensor is mounted firmly. Tapping START will trigger automatic sensor zeroing on the ESP32. Keep the motorcycle upright and stationary for ~2s."
                             } else {
                                 "Any orientation is supported. Pressing CENTER & START will define the current position as 0° reference."
                             },
@@ -161,7 +165,78 @@ fun PreparationScreen(
                 }
             }
 
-            if (isBleMode && !canStart) {
+            if (isCalibrating) {
+                Spacer(modifier = Modifier.height(16.dp))
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(1.dp, MaterialTheme.colorScheme.primaryCyan, RoundedCornerShape(16.dp))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(28.dp),
+                            color = MaterialTheme.colorScheme.primaryCyan,
+                            strokeWidth = 3.dp
+                        )
+                        Spacer(modifier = Modifier.width(14.dp))
+                        Column {
+                            Text(
+                                text = "Calibrating ESP32 Sensor...",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primaryCyan
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Collecting 2 seconds of stationary samples. Please keep motorcycle upright and completely still.",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            } else if (isCalFailed) {
+                Spacer(modifier = Modifier.height(16.dp))
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(1.dp, MaterialTheme.colorScheme.warningAmber, RoundedCornerShape(16.dp))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Warning,
+                            contentDescription = "Calibration Failed",
+                            tint = MaterialTheme.colorScheme.warningAmber,
+                            modifier = Modifier.size(28.dp)
+                        )
+                        Spacer(modifier = Modifier.width(14.dp))
+                        Column {
+                            Text(
+                                text = "Calibration Failed",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.warningAmber
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Sensor motion or instability detected during zeroing. Keep the vehicle stationary and tap RETRY.",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            } else if (isBleMode && !canStart) {
                 Spacer(modifier = Modifier.height(16.dp))
                 Card(
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -268,8 +343,8 @@ fun PreparationScreen(
 
             // CENTER & START Button (Requirement 6)
             Button(
-                onClick = { if (canStart) onCenterAndStartClick() },
-                enabled = canStart,
+                onClick = { if (canPressStart) onCenterAndStartClick() },
+                enabled = canPressStart,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = if (isDark) MaterialTheme.colorScheme.primaryCyan else MaterialTheme.colorScheme.onBackground,
                     disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant
@@ -279,7 +354,7 @@ fun PreparationScreen(
                     .fillMaxWidth()
                     .height(68.dp)
                     .border(
-                        width = if (isDark || !canStart) 0.dp else 2.dp,
+                        width = if (isDark || !canPressStart) 0.dp else 2.dp,
                         color = MaterialTheme.colorScheme.onBackground,
                         shape = RoundedCornerShape(20.dp)
                     )
@@ -288,18 +363,31 @@ fun PreparationScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center
                 ) {
-                    Icon(
-                        imageVector = if (!canStart) Icons.Default.Warning else Icons.Default.CompassCalibration,
-                        contentDescription = "Center and Start",
-                        tint = if (canStart) MaterialTheme.colorScheme.background else MaterialTheme.colorScheme.textMuted,
-                        modifier = Modifier.size(28.dp)
-                    )
+                    if (isCalibrating) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(24.dp),
+                            color = MaterialTheme.colorScheme.background,
+                            strokeWidth = 2.5.dp
+                        )
+                    } else {
+                        Icon(
+                            imageVector = if (!canStart) Icons.Default.Warning else Icons.Default.CompassCalibration,
+                            contentDescription = "Center and Start",
+                            tint = if (canPressStart) MaterialTheme.colorScheme.background else MaterialTheme.colorScheme.textMuted,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
                     Spacer(modifier = Modifier.width(12.dp))
                     Text(
-                        text = if (!canStart) "CONNECT ESP32 TO START" else "CENTER & START",
-                        fontSize = if (!canStart) 16.sp else 20.sp,
+                        text = when {
+                            !canStart -> "CONNECT ESP32 TO START"
+                            isCalibrating -> "CALIBRATING... (STATIONARY)"
+                            isCalFailed -> "RETRY CALIBRATION & START"
+                            else -> "CENTER & START"
+                        },
+                        fontSize = if (!canStart || isCalibrating || isCalFailed) 16.sp else 20.sp,
                         fontWeight = FontWeight.Black,
-                        color = if (canStart) MaterialTheme.colorScheme.background else MaterialTheme.colorScheme.textMuted,
+                        color = if (canPressStart) MaterialTheme.colorScheme.background else MaterialTheme.colorScheme.textMuted,
                         letterSpacing = 1.2.sp
                     )
                 }

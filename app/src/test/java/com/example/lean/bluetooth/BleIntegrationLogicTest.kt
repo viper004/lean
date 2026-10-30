@@ -49,6 +49,60 @@ class BleIntegrationLogicTest {
     }
 
     @Test
+    fun testBleCalibrationStatusEnumParsing() {
+        assertEquals(BleCalibrationStatus.IDLE, BleCalibrationStatus.fromByte(0x00))
+        assertEquals(BleCalibrationStatus.CALIBRATING, BleCalibrationStatus.fromByte(0x01))
+        assertEquals(BleCalibrationStatus.SUCCESS, BleCalibrationStatus.fromByte(0x02))
+        assertEquals(BleCalibrationStatus.FAILED, BleCalibrationStatus.fromByte(0x03))
+        // Unknown byte falls back to IDLE
+        assertEquals(BleCalibrationStatus.IDLE, BleCalibrationStatus.fromByte(0xFF.toByte()))
+    }
+
+    @Test
+    fun testEsp32SingleSourceOfTruthPacket() {
+        // The ESP32 produces calibrated angle directly (e.g. +14.25° after calibration)
+        val calibratedPacket = BlePacket(
+            leanAngleDegrees = 14.25f,
+            gyroRollRateDps = 3.2f,
+            isMpuOk = true,
+            isValidReading = true,
+            rawStatusFlags = 0x03,
+            sequenceId = 10,
+            reserved = 0
+        )
+        // Android consumes calibrated value directly without local offset modification
+        assertEquals(14.25f, calibratedPacket.leanAngleDegrees, 0.001f)
+        assertTrue(calibratedPacket.isValidReading)
+    }
+
+    @Test
+    fun testLeanStateCalibrationFlags() {
+        val idleState = com.example.lean.data.LeanState(
+            isBleSensorActive = true,
+            bleCalibrationStatus = BleCalibrationStatus.IDLE
+        )
+        assertFalse(idleState.isBleCalibrating)
+
+        val calibratingState = com.example.lean.data.LeanState(
+            isBleSensorActive = true,
+            bleCalibrationStatus = BleCalibrationStatus.CALIBRATING
+        )
+        assertTrue(calibratingState.isBleCalibrating)
+
+        val successState = com.example.lean.data.LeanState(
+            isBleSensorActive = true,
+            bleCalibrationStatus = BleCalibrationStatus.SUCCESS
+        )
+        assertFalse(successState.isBleCalibrating)
+    }
+
+    @Test
+    fun testCalibrationUuidConstants() {
+        assertEquals("7b8e0003-7a4d-4f2b-9c3a-6d1e5f000001", LeanBleManager.CALIBRATION_COMMAND_UUID.toString())
+        assertEquals("7b8e0004-7a4d-4f2b-9c3a-6d1e5f000001", LeanBleManager.CALIBRATION_STATUS_UUID.toString())
+    }
+
+    @Test
     fun testBleConnectionStateEnumValues() {
         assertEquals("DISCONNECTED", BleConnectionState.DISCONNECTED.name)
         assertEquals("SCANNING", BleConnectionState.SCANNING.name)
